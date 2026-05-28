@@ -44,8 +44,8 @@ This is the most conceptually important phase. We define what a node in the trie
 looks like and how nodes relate to each other.
 
 ### 2.1 Define `TrieNode<V>`
-- [ ] Create `src/node.rs`
-- [ ] Define a node with: two optional child pointers (`children: [Option<Box<TrieNode<V>>>; 2]`)
+- [x] Create `src/node.rs`
+- [x] Define a node with: two optional child pointers (`children: [Option<Box<TrieNode<V>>>; 2]`)
       and an optional stored value (`value: Option<V>`)
 
 **Why this matters:** Each node in the trie represents one bit position along a path.
