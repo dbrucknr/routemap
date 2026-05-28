@@ -102,3 +102,42 @@ Box<TrieNode<V>> is just a pointer, which has a fixed size. This is the standard
 Why Option<V> and not just V?
 Not every node marks a prefix endpoint. Intermediate nodes exist only to connect two prefixes that share a common bit prefix — they have no value of
 their own. None means "structural node only"; Some(v) means "a prefix ends here."
+
+---
+3.1 — Two new concepts before writing IpTable
+
+Why two type parameters: IpTable<A, V>
+
+V is the value type — the thing you're storing (route entry, geo record, etc.). A is the address family — Ipv4Addr or Ipv6Addr. We put A on the struct
+ so the type system enforces that a table is dedicated to one address family. You can't accidentally insert an IPv6 prefix into an IPv4 table — the
+compiler rejects it.
+
+PhantomData<A> — a new pattern
+
+A appears in method signatures (insert takes an IpPrefix<A>) but isn't stored in any field. Rust requires that every declared type parameter actually
+appear in a field, otherwise it can't reason about ownership and lifetimes. PhantomData<A> is the solution — it's a zero-sized type that vanishes
+completely at runtime but satisfies the compiler. The _ prefix on _marker signals to Rust not to warn about an "unused" field.
+
+use std::marker::PhantomData;
+
+pub struct IpTable<A: IpAddress, V> {
+    root: TrieNode<V>,
+    _marker: PhantomData<A>,
+}
+
+The insert algorithm
+
+Here's the logic in plain English before you write it:
+
+1. Call .masked() on the prefix — canonicalise it (zeroes host bits)
+2. Pull out the address bits with .ip().to_u128()
+3. Pull out the depth limit with .mask() as u32
+4. Start at self.root with a mutable reference called node
+5. Loop depth from 0 to len (exclusive):
+  - Extract the current bit: ((addr >> (A::BITS as u32 - 1 - depth)) & 1) as usize — gives you 0 or 1
+  - If node.children[bit] is None, create a new node there
+  - Step down: reassign node to node.children[bit].as_mut().unwrap()
+6. After the loop, set node.value = Some(value)
+
+The loop runs exactly prefix_len times — for a /8 that's 8 iterations, placing you at depth 8. The value is stored there. The remaining bits of the
+address are irrelevant for this prefix.
