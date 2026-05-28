@@ -12,8 +12,8 @@ Before writing any trie code, we need to understand the building blocks we'll us
 and set up the crate so it is ready to publish when the time comes.
 
 ### 1.1 Crate metadata
-- [ ] Fill in `Cargo.toml` — `description`, `license`, `repository`, `keywords`, `categories`
-- [ ] Add `readme = "README.md"` so crates.io renders our documentation
+- [x] Fill in `Cargo.toml` — `description`, `license`, `repository`, `keywords`, `categories`
+- [x] Add `readme = "README.md"` so crates.io renders our documentation
 
 **Why this matters:** crates.io uses these fields for search and discovery.
 A crate with no description or keywords is effectively invisible.
