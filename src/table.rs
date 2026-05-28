@@ -201,6 +201,9 @@ impl<A: IpAddress, V> IpTable<A, V> {
         value
     }
 
+    // Recursion depth is bounded by A::BITS — 32 for IPv4, 128 for IPv6.
+    // This is a hard constant regardless of table size, so stack overflow is
+    // not a concern even for very large tables.
     fn remove_recursive(
         node: &mut TrieNode<V>,
         addr: u128,
