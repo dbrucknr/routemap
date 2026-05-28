@@ -1,5 +1,6 @@
 Claude provided documentation about how we use ipnetx to solve the LPM problem:
 
+1.1
 What ipnetx gives us
 
 There are two types we'll use from ipnetx. Let's look at each.
@@ -85,3 +86,19 @@ Summarising the four things our implementation will call into ipnetx for:
 └───────────────────────┴──────────────────────────────────────────────────────────────────┘
 
 That's the complete interface. The trie itself is pure Rust — ipnetx just hands us integers and constants.
+
+--
+For 2.1 we're creating src/node.rs — the foundational building block of the trie. Before writing, let me explain the three design decisions so the
+code reads as obvious rather than arbitrary.
+
+Why [Option<Box<TrieNode<V>>>; 2] instead of left and right fields?
+Because the bit extraction formula gives us 0 or 1 directly. children[bit] where bit is 0 or 1 lets us index without a branch — cleaner insert and
+lookup code.
+
+Why Box?
+Rust requires that every type has a known size at compile time. TrieNode<V> can't contain TrieNode<V> directly — that would be infinite size.
+Box<TrieNode<V>> is just a pointer, which has a fixed size. This is the standard Rust pattern for any recursive data structure.
+
+Why Option<V> and not just V?
+Not every node marks a prefix endpoint. Intermediate nodes exist only to connect two prefixes that share a common bit prefix — they have no value of
+their own. None means "structural node only"; Some(v) means "a prefix ends here."
