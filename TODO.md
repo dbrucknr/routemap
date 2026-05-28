@@ -1,4 +1,4 @@
-# netlpm — Implementation Plan
+# iplookup — Implementation Plan
 
 This document is both a roadmap and a learning guide. Each phase builds on the last.
 Take as much time as needed between steps — understanding *why* each piece exists
@@ -120,7 +120,7 @@ or post-order approach.
 ---
 
 ### 4.2 `contains(prefix: &IpPrefix<A>) -> bool`
-- [ ] Walk to the node at the prefix's depth, return whether it holds a value
+- [x] Walk to the node at the prefix's depth, return whether it holds a value
 
 **Why this matters:** Cheaper than `longest_match` when you only need a membership
 check — no need to return a value or track a best-match register.

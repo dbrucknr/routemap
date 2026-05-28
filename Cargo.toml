@@ -1,10 +1,10 @@
 [package]
-name = "netlpm"
+name = "iplookup"
 version = "0.1.0"
 edition = "2024"
 description = "In-memory Longest Prefix Match (LPM) routing tables for IPv4 and IPv6, built on ipnetx."
 license = "MIT"
-repository = "https://github.com/dbrucknr/netlpm"
+repository = "https://github.com/dbrucknr/iplookup"
 readme = "README.md"
 keywords = ["ip", "network", "routing", "lpm", "cidr"]
 categories = ["network-programming", "data-structures"]

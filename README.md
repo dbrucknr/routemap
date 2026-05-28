@@ -1,10 +1,10 @@
-# netlpm
+# iplookup
 
 Longest Prefix Match (LPM) routing tables for Rust, built on [`ipnetx`](https://crates.io/crates/ipnetx).
 
 ```toml
 [dependencies]
-netlpm = "0.1"
+iplookup = "0.1"
 ```
 
 ---
@@ -47,7 +47,7 @@ None of these naturally express the question: *what is the deepest matching node
 
 ## How It Works: Patricia Trie
 
-`netlpm` uses a **Patricia trie** (also called a compressed radix tree). A trie is a tree where the path from root to a node spells out the key — for IP prefixes, the key is the binary representation of the address.
+`iplookup` uses a **Patricia trie** (also called a compressed radix tree). A trie is a tree where the path from root to a node spells out the key — for IP prefixes, the key is the binary representation of the address.
 
 Consider a table with two entries:
 
@@ -83,21 +83,23 @@ W is a constant (32 or 128), so lookups are effectively O(1) in practice regardl
 ## Quick Start
 
 ```rust
-use netlpm::IpTable;
+use iplookup::IpTable;
+use std::net::Ipv4Addr;
 
-let mut table: IpTable<&str> = IpTable::new();
+let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
 
-table.insert("10.0.0.0/8".parse()?,   "datacenter");
-table.insert("10.20.0.0/16".parse()?, "third-floor");
-table.insert("0.0.0.0/0".parse()?,    "default");
+table.insert("10.0.0.0/8".parse().unwrap(),   "datacenter");
+table.insert("10.20.0.0/16".parse().unwrap(), "third-floor");
+table.insert("0.0.0.0/0".parse().unwrap(),    "default");
 
-// Longest prefix match
-let result = table.longest_match("10.20.5.1".parse()?);
-assert_eq!(result.map(|(_, v)| *v), Some("third-floor"));
+// Most specific match wins
+assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"third-floor"));
 
 // Falls back to less-specific match
-let result = table.longest_match("10.99.0.1".parse()?);
-assert_eq!(result.map(|(_, v)| *v), Some("datacenter"));
+assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"datacenter"));
+
+// Falls back to default route
+assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), Some(&"default"));
 ```
 
 ---
@@ -116,10 +118,10 @@ assert_eq!(result.map(|(_, v)| *v), Some("datacenter"));
 
 ## Relationship to `ipnetx`
 
-`netlpm` uses [`IpPrefix<A>`](https://docs.rs/ipnetx) from `ipnetx` as its key type. `ipnetx` provides set algebra on IP address space (union, intersection, difference, complement); `netlpm` provides the lookup table. They are designed to complement each other:
+`iplookup` uses [`IpPrefix<A>`](https://docs.rs/ipnetx) from `ipnetx` as its key type. `ipnetx` provides set algebra on IP address space (union, intersection, difference, complement); `iplookup` provides the lookup table. They are designed to complement each other:
 
 - Use `ipnetx` when you need to reason about *regions* of IP space as mathematical sets.
-- Use `netlpm` when you need to *classify an individual IP* against a set of prefixes at lookup speed.
+- Use `iplookup` when you need to *classify an individual IP* against a set of prefixes at lookup speed.
 
 ---
 

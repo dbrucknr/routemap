@@ -25,7 +25,7 @@ use std::marker::PhantomData;
 /// # Example
 ///
 /// ```
-/// use netlpm::IpTable;
+/// use iplookup::IpTable;
 /// use std::net::Ipv4Addr;
 ///
 /// let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
@@ -51,7 +51,7 @@ impl<A: IpAddress, V> IpTable<A, V> {
     /// # Example
     ///
     /// ```
-    /// use netlpm::IpTable;
+    /// use iplookup::IpTable;
     /// use std::net::Ipv4Addr;
     ///
     /// let table: IpTable<Ipv4Addr, &str> = IpTable::new();
@@ -78,7 +78,7 @@ impl<A: IpAddress, V> IpTable<A, V> {
     /// # Example
     ///
     /// ```
-    /// use netlpm::IpTable;
+    /// use iplookup::IpTable;
     /// use std::net::Ipv4Addr;
     ///
     /// let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
@@ -122,7 +122,7 @@ impl<A: IpAddress, V> IpTable<A, V> {
     /// # Example
     ///
     /// ```
-    /// use netlpm::IpTable;
+    /// use iplookup::IpTable;
     /// use std::net::Ipv4Addr;
     ///
     /// let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
@@ -175,7 +175,7 @@ impl<A: IpAddress, V> IpTable<A, V> {
     /// # Example
     ///
     /// ```
-    /// use netlpm::IpTable;
+    /// use iplookup::IpTable;
     /// use std::net::Ipv4Addr;
     ///
     /// let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
@@ -199,6 +199,51 @@ impl<A: IpAddress, V> IpTable<A, V> {
         );
 
         value
+    }
+
+    /// Returns `true` if the table contains an entry for exactly this prefix.
+    ///
+    /// This checks for an exact prefix match — not whether an address falls within
+    /// any stored prefix. For example, if the table contains `10.0.0.0/8`, then
+    /// `contains("10.0.0.0/8")` returns `true`, but `contains("10.20.0.0/16")`
+    /// returns `false` even though `10.20.x.x` addresses would match via
+    /// [`longest_match`](IpTable::longest_match).
+    ///
+    /// Any host bits set in the prefix address are ignored — `contains("10.99.0.0/8")`
+    /// and `contains("10.0.0.0/8")` are equivalent.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iplookup::IpTable;
+    /// use std::net::Ipv4Addr;
+    ///
+    /// let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+    /// table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+    ///
+    /// // Exact prefix match.
+    /// assert!(table.contains("10.0.0.0/8".parse().unwrap()));
+    ///
+    /// // A more specific prefix that was never inserted returns false,
+    /// // even though 10.20.x.x addresses match via longest_match.
+    /// assert!(!table.contains("10.20.0.0/16".parse().unwrap()));
+    /// ```
+    pub fn contains(&self, prefix: IpPrefix<A>) -> bool {
+        let mut node = &self.root;
+        let prefix = prefix.masked();
+        let addr = prefix.ip().to_u128();
+        let len = prefix.mask() as u32; // Prefix length
+
+        for depth in 0..len {
+            let bit = ((addr >> (A::BITS as u32 - 1 - depth)) & 1) as usize;
+            if let Some(child) = node.children[bit].as_deref() {
+                node = child
+            } else {
+                return false;
+            }
+        }
+
+        node.value.is_some()
     }
 
     // Recursion depth is bounded by A::BITS — 32 for IPv4, 128 for IPv6.
@@ -578,5 +623,61 @@ mod tests {
 
         assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), None);
         assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), None);
+    }
+
+    // ── contains ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn contains_inserted_prefix() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        assert!(table.contains("10.0.0.0/8".parse().unwrap()));
+    }
+
+    #[test]
+    fn does_not_contain_uninserted_prefix() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        assert!(!table.contains("192.168.0.0/16".parse().unwrap()));
+    }
+
+    #[test]
+    fn does_not_contain_more_specific_prefix_that_was_not_inserted() {
+        // This is the key distinction between contains and longest_match.
+        // longest_match("10.20.5.1") would return "ten" via the /8 entry,
+        // but contains("10.20.0.0/16") is false — that prefix was never inserted.
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        assert!(!table.contains("10.20.0.0/16".parse().unwrap()));
+    }
+
+    #[test]
+    fn does_not_contain_broader_prefix_that_was_not_inserted() {
+        // A more specific prefix being present does not imply the broader one is.
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+        assert!(!table.contains("10.0.0.0/8".parse().unwrap()));
+    }
+
+    #[test]
+    fn contains_false_after_remove() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        table.remove("10.0.0.0/8".parse().unwrap());
+        assert!(!table.contains("10.0.0.0/8".parse().unwrap()));
+    }
+
+    #[test]
+    fn contains_with_unmasked_prefix() {
+        // Host bits in the prefix address are ignored.
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        assert!(table.contains("10.99.99.99/8".parse().unwrap()));
+    }
+
+    #[test]
+    fn empty_table_contains_nothing() {
+        let table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        assert!(!table.contains("10.0.0.0/8".parse().unwrap()));
     }
 }
