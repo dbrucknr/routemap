@@ -72,8 +72,8 @@ With the node structure in place, we implement the two operations the entire cra
 is built around. Everything else is API surface on top of these.
 
 ### 3.1 `insert(prefix: IpPrefix<A>, value: V)`
-- [ ] Create `src/table.rs` with the `IpTable<V>` struct (owns the root node)
-- [ ] Implement `insert`: walk the trie bit by bit for `prefix_len` steps, creating
+- [x] Create `src/table.rs` with the `IpTable<V>` struct (owns the root node)
+- [x] Implement `insert`: walk the trie bit by bit for `prefix_len` steps, creating
       child nodes as needed, then store `value` at the final node
 
 **Why this matters:** Insert teaches you the trie's write path. You are essentially
