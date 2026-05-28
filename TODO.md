@@ -87,9 +87,9 @@ remaining bits do not matter for this prefix, so you stop early.
 ---
 
 ### 3.2 `longest_match(addr: A) -> Option<(IpPrefix<A>, &V)>`
-- [ ] Implement `longest_match`: walk the trie bit by bit for all W bits, and at
+- [x] Implement `longest_match`: walk the trie bit by bit for all W bits, and at
       every node that has a stored value, update a "best match so far" register
-- [ ] After the walk, return whatever is in the register
+- [x] After the walk, return whatever is in the register
 
 **Why this matters:** This is the payoff. Lookup is simpler than insert — you never
 create nodes, you only follow them. The key insight is that you do *not* stop at the

@@ -141,3 +141,36 @@ Here's the logic in plain English before you write it:
 
 The loop runs exactly prefix_len times — for a /8 that's 8 iterations, placing you at depth 8. The value is stored there. The remaining bits of the
 address are irrelevant for this prefix.
+
+  ---
+  4.1 — Why remove needs recursion
+  
+  With insert and longest_match, walking down the tree in a loop was natural — you always move forward. remove has an extra requirement: pruning.
+
+  After you take a value out, the node it lived in might now be dead weight — no value, no children. You should delete it. But its parent might now also
+   be dead weight. And its grandparent too. You can only know whether to delete a node after you've processed everything below it.
+
+  That's a post-order problem — act on the way back up. Recursion expresses this naturally: each call returns a signal to its caller saying "the child
+  you sent me into is now empty — you can delete it."
+
+  The shape:
+
+  remove_recursive(node, addr, depth, target_depth):
+      if depth == target_depth:
+          take the value out of node
+          return (taken_value, node_is_now_empty)
+
+      bit = extract bit at this depth
+      if child[bit] exists:
+          (value, should_prune) = recurse into child
+          if should_prune → delete child[bit]
+          return (value, this_node_is_now_empty)
+      else:
+          prefix wasn't in the table → return (None, false)
+
+  One new method to know: Option::take() — removes the value from an Option in place and returns it, leaving None behind:
+  let v = node.value.take(); // node.value is now None, v is the old Option<V>
+  
+  "Node is now empty" means: node.value.is_none() && node.children[0].is_none() && node.children[1].is_none()
+
+  The public remove method calls the recursive helper and ignores the prune signal for the root — the root node is never deleted, it always stays.
