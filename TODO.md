@@ -21,9 +21,9 @@ A crate with no description or keywords is effectively invisible.
 ---
 
 ### 1.2 Understand `IpPrefix<A>` from ipnetx
-- [ ] Read through the ipnetx source for `IpPrefix<A>` and the `IpAddress` trait
-- [ ] Understand `addr.to_u128()` — this is how we extract individual bits during trie traversal
-- [ ] Understand `prefix.prefix_len()` — this tells us how deep in the trie a prefix lives
+- [x] Read through the ipnetx source for `IpPrefix<A>` and the `IpAddress` trait
+- [x] Understand `addr.to_u128()` — this is how we extract individual bits during trie traversal
+- [x] Understand `prefix.mask()` — this tells us how deep in the trie a prefix lives
 
 **Why this matters:** The trie does not store prefixes as strings or structs — it
 encodes them as paths through the tree. Every bit of the address is a left (0) or
