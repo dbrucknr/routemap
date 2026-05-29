@@ -210,7 +210,8 @@ assert_eq!(entries[1].1, &"specific"); // /16 comes second
 
 Backed by a **stride-4 treebitmap**. Instead of following one bit per node (as a binary trie does), each node processes 4 bits at once. This cuts maximum lookup depth from 32 → 8 hops for IPv4 and 128 → 32 hops for IPv6, and keeps related prefixes in the same cache line.
 
-Benchmarked on Apple M2 Max, Rust 1.94.0, `cargo bench`:
+Benchmarked on Apple M2 Max, Rust 1.94.0, `cargo bench`. All throughput
+figures are in **M/s — millions of operations per second**.
 
 ### Lookup — `longest_match` throughput
 
