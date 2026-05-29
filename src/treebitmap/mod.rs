@@ -232,6 +232,41 @@ impl<A: IpAddress, V> IpTable<A, V> {
     /// assert!(table.contains("10.0.0.0/8".parse().unwrap()));
     /// assert!(!table.contains("10.20.0.0/16".parse().unwrap()));
     /// ```
+    /// Returns an iterator over all `(prefix, &value)` pairs in the table.
+    ///
+    /// Entries are yielded in depth-first order: shorter prefixes at a given
+    /// node before the longer prefixes stored in its children.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iplookup::IpTable;
+    /// use std::net::Ipv4Addr;
+    ///
+    /// let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+    /// table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+    /// table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+    ///
+    /// let mut entries: Vec<_> = table.iter().collect();
+    /// entries.sort_by_key(|(p, _)| p.mask());
+    ///
+    /// assert_eq!(entries[0].1, &"broad");
+    /// assert_eq!(entries[1].1, &"specific");
+    /// ```
+    pub fn iter(&self) -> Iter<'_, A, V> {
+        Iter {
+            stack: vec![IterFrame {
+                node: &self.root,
+                hop: 0,
+                addr: 0,
+                internal_cursor: 1,
+                external_cursor: 0,
+            }],
+            addr_bits: A::BITS as u32,
+            _marker: PhantomData,
+        }
+    }
+
     pub fn contains(&self, prefix: IpPrefix<A>) -> bool {
         let prefix = prefix.masked();
         let addr = prefix.ip().to_u128();
@@ -367,6 +402,116 @@ fn contains_at<V>(
             full_hops,
             rel_len,
         )
+    }
+}
+
+// ── Iterator ──────────────────────────────────────────────────────────────────
+
+struct IterFrame<'a, V> {
+    node: &'a TbNode<V>,
+    hop: u32,
+    /// Accumulated address bits set so far by following nibbles from the root.
+    addr: u128,
+    /// Next internal bitmap position to scan (1..=15; set to 16 when exhausted).
+    internal_cursor: u32,
+    /// Next external bitmap nibble to scan (0..=15; set to 16 when exhausted).
+    external_cursor: u32,
+}
+
+/// An iterator over all `(prefix, &value)` pairs in an [`IpTable`].
+///
+/// Entries are yielded in depth-first order: a node's internal prefixes
+/// (shorter to longer within the stride) before its children's prefixes.
+///
+/// Created by [`IpTable::iter`].
+pub struct Iter<'a, A: IpAddress, V> {
+    stack: Vec<IterFrame<'a, V>>,
+    addr_bits: u32,
+    _marker: PhantomData<A>,
+}
+
+impl<'a, A: IpAddress, V> Iterator for Iter<'a, A, V> {
+    type Item = (IpPrefix<A>, &'a V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let depth = self.stack.len();
+            if depth == 0 {
+                return None;
+            }
+
+            // Copy all fields we need out of the frame first.
+            // &'a TbNode<V> is Copy, so this severs the borrow from self.stack,
+            // letting us mutate self.stack (write cursor, push child) afterwards.
+            let node: &'a TbNode<V> = self.stack[depth - 1].node;
+            let hop = self.stack[depth - 1].hop;
+            let addr = self.stack[depth - 1].addr;
+
+            // ── Internal entries ──────────────────────────────────────────────
+            // bpos encodes (rel_len, rel_bits) via binary-heap indexing:
+            //   rel_len  = floor(log2(bpos))
+            //   rel_bits = bpos - (1 << rel_len)
+            let ic = self.stack[depth - 1].internal_cursor;
+            if ic <= 15 {
+                let above = node.internal >> ic;
+                if above != 0 {
+                    let bpos = ic + above.trailing_zeros();
+                    self.stack[depth - 1].internal_cursor = bpos + 1;
+
+                    let rel_len = 31 - bpos.leading_zeros(); // floor(log2(bpos))
+                    let rel_bits = bpos - (1u32 << rel_len);
+                    let full_len = hop * STRIDE + rel_len;
+                    let full_addr = if rel_len > 0 {
+                        addr | ((rel_bits as u128)
+                            << (self.addr_bits - hop * STRIDE - rel_len))
+                    } else {
+                        addr
+                    };
+
+                    let idx = rank(node.internal, bpos);
+                    let value: &'a V = &node.values[idx];
+                    let prefix =
+                        IpPrefix::new(A::from_u128(full_addr), full_len as u8).unwrap();
+                    return Some((prefix, value));
+                }
+                self.stack[depth - 1].internal_cursor = 16;
+            }
+
+            // ── External children ─────────────────────────────────────────────
+            // Returns true when a child was pushed so we skip the pop and loop
+            // back to process the new top frame.  No `continue` is used to avoid
+            // an llvm-cov artifact where a closing `}` before `continue` is
+            // counted as an unreachable region.
+            let ec = self.stack[depth - 1].external_cursor;
+            let pushed = ec <= 15 && {
+                let above = node.external >> ec;
+                if above == 0 {
+                    self.stack[depth - 1].external_cursor = 16;
+                    false
+                } else {
+                    let nib = ec + above.trailing_zeros();
+                    self.stack[depth - 1].external_cursor = nib + 1;
+                    let child_addr =
+                        addr | ((nib as u128) << (self.addr_bits - (hop + 1) * STRIDE));
+                    let child_idx = rank(node.external, nib);
+                    // Borrow through the copied &'a TbNode<V>, not through self.stack.
+                    let child_node: &'a TbNode<V> = &node.children[child_idx];
+                    self.stack.push(IterFrame {
+                        node: child_node,
+                        hop: hop + 1,
+                        addr: child_addr,
+                        internal_cursor: 1,
+                        external_cursor: 0,
+                    });
+                    true
+                }
+            };
+
+            // Both exhausted — backtrack.
+            if !pushed {
+                self.stack.pop();
+            }
+        }
     }
 }
 
@@ -760,5 +905,134 @@ mod tests {
 
         assert!(table.contains("10.64.0.0/10".parse().unwrap()));
         assert!(!table.contains("10.0.0.0/10".parse().unwrap())); // different /10 block
+    }
+
+    // ── iter ──────────────────────────────────────────────────────────────────
+
+    fn sorted_entries<A: IpAddress, V: Clone>(
+        table: &IpTable<A, V>,
+    ) -> Vec<(String, V)> {
+        let mut entries: Vec<_> = table
+            .iter()
+            .map(|(p, v)| (format!("{}/{}", p.ip(), p.mask()), v.clone()))
+            .collect();
+        entries.sort_by_key(|(p, _)| p.clone());
+        entries
+    }
+
+    #[test]
+    fn iter_empty_table() {
+        let table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        assert_eq!(table.iter().count(), 0);
+    }
+
+    #[test]
+    fn iter_single_default_route() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("0.0.0.0/0".parse().unwrap(), "default");
+        let entries = sorted_entries(&table);
+        assert_eq!(entries, vec![("0.0.0.0/0".to_string(), "default")]);
+    }
+
+    #[test]
+    fn iter_single_host_route() {
+        // /32 is stored at maximum depth — exercises the post-loop node visit.
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.1/32".parse().unwrap(), "host");
+        let entries = sorted_entries(&table);
+        assert_eq!(entries, vec![("10.0.0.1/32".to_string(), "host")]);
+    }
+
+    #[test]
+    fn iter_multiple_prefixes_all_present() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("0.0.0.0/0".parse().unwrap(),    "default");
+        table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+        table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+        table.insert("10.20.30.0/24".parse().unwrap(), "narrow");
+
+        let entries = sorted_entries(&table);
+        assert_eq!(entries.len(), 4);
+        assert!(entries.iter().any(|(_, v)| *v == "default"));
+        assert!(entries.iter().any(|(_, v)| *v == "broad"));
+        assert!(entries.iter().any(|(_, v)| *v == "specific"));
+        assert!(entries.iter().any(|(_, v)| *v == "narrow"));
+    }
+
+    #[test]
+    fn iter_reconstructs_prefix_correctly() {
+        // Verifies that the address and mask are faithfully recovered.
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("192.168.1.0/24".parse().unwrap(), "subnet");
+
+        let (prefix, value) = table.iter().next().unwrap();
+        assert_eq!(format!("{}", prefix.ip()), "192.168.1.0");
+        assert_eq!(prefix.mask(), 24);
+        assert_eq!(*value, "subnet");
+    }
+
+    #[test]
+    fn iter_non_stride_aligned_prefix() {
+        // /10 has rel_len=2; checks that internal bitmap decoding is correct.
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.64.0.0/10".parse().unwrap(), "slash10");
+
+        let entries = sorted_entries(&table);
+        assert_eq!(entries, vec![("10.64.0.0/10".to_string(), "slash10")]);
+    }
+
+    #[test]
+    fn iter_count_matches_insert_count() {
+        // Round-trip: insert N distinct prefixes, iter must yield exactly N.
+        let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+        let prefixes = [
+            "0.0.0.0/0", "10.0.0.0/8", "10.0.0.0/16", "10.0.0.0/24",
+            "172.16.0.0/12", "192.168.0.0/16", "192.168.1.0/24", "10.0.0.1/32",
+        ];
+        for (i, p) in prefixes.iter().enumerate() {
+            table.insert(p.parse().unwrap(), i as u32);
+        }
+        assert_eq!(table.iter().count(), prefixes.len());
+    }
+
+    #[test]
+    fn iter_ipv6() {
+        let mut table: IpTable<Ipv6Addr, &str> = IpTable::new();
+        table.insert("::/0".parse().unwrap(),          "default");
+        table.insert("2001:db8::/32".parse().unwrap(), "docs");
+        table.insert("2001:db8:1::/48".parse().unwrap(), "subnet");
+
+        let entries = sorted_entries(&table);
+        assert_eq!(entries.len(), 3);
+        assert!(entries.iter().any(|(_, v)| *v == "default"));
+        assert!(entries.iter().any(|(_, v)| *v == "docs"));
+        assert!(entries.iter().any(|(_, v)| *v == "subnet"));
+    }
+
+    #[test]
+    fn iter_multiple_external_children_exhausted() {
+        // Forces the external-cursor-exhausted path (ec <= 15, above == 0)
+        // by giving the root node three external children. After iterating
+        // through all three subtrees the cursor scans past the last set bit.
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        // nibble[0] of each: 0x0A=10→nib 0, 0x40=64→nib 4, 0xC0=192→nib 12
+        table.insert("10.0.0.0/8".parse().unwrap(),    "ten");
+        table.insert("64.0.0.0/8".parse().unwrap(),    "sixty-four");
+        table.insert("192.168.0.0/16".parse().unwrap(), "office");
+
+        assert_eq!(table.iter().count(), 3);
+    }
+
+    #[test]
+    fn iter_after_remove_reflects_change() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+        table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+
+        table.remove("10.0.0.0/8".parse().unwrap());
+
+        let entries = sorted_entries(&table);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0], ("10.20.0.0/16".to_string(), "specific"));
     }
 }

@@ -147,8 +147,11 @@ The trie works. Now we round out the public API to make it genuinely useful.
 ## Phase 7 — Quality and Polish
 
 ### 7.1 `iter()` — iterate all `(IpPrefix<A>, &V)` pairs
-- [ ] Implement an in-order traversal of the treebitmap that reconstructs each prefix
-      from the path and internal bitmap position taken to reach its node
+- [x] Implement a stack-based DFS iterator that reconstructs each prefix from the
+      accumulated nibble path and internal bitmap position (rel_len + rel_bits →
+      full_len + full_addr via `A::from_u128` and `IpPrefix::new`)
+- [x] 9 targeted tests covering empty table, /0, /32, non-stride-aligned lengths,
+      IPv6, and post-remove correctness
 
 **Why this matters:** Callers need to inspect the full table — for serialization,
 debugging, or feeding results into an `ipnetx` `IpSetBuilder`. With the treebitmap
@@ -215,7 +218,7 @@ structure — that would couple the wire format to the implementation.
 6.2 Choose stride (4)                           ✓
 6.3 Implement treebitmap + benchmark comparison ✓
     ↓
-7.1 iter()                                      ← next
+7.1 iter()                                      ✓
 7.2 Trait impls (Default, Debug, FromIterator)
 7.3 Documentation                               ✓
 7.4 serde support
