@@ -2,6 +2,11 @@
 
 Fast, in-memory **Longest Prefix Match (LPM)** routing tables for IPv4 and IPv6 in Rust.
 
+[![Crates.io](https://img.shields.io/crates/v/iplookup.svg)](https://crates.io/crates/iplookup)
+[![Docs.rs](https://docs.rs/iplookup/badge.svg)](https://docs.rs/iplookup/latest/iplookup/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![codecov](https://codecov.io/gh/dbrucknr/iplookup/graph/badge.svg)](https://codecov.io/gh/dbrucknr/iplookup)
+
 ```toml
 [dependencies]
 iplookup = "0.1"
