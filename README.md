@@ -159,6 +159,51 @@ assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"specific"))
 assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), None);
 ```
 
+### `len() -> usize` and `is_empty() -> bool`
+
+`len` returns the number of prefix entries in the table in O(1) time. `is_empty` returns `true` when the table has no entries.
+
+```rust
+# use iplookup::IpTable;
+# use std::net::Ipv4Addr;
+# let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+assert!(table.is_empty());
+
+table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+assert_eq!(table.len(), 2);
+
+// Overwriting an existing prefix does not change the count.
+table.insert("10.0.0.0/8".parse().unwrap(), "updated");
+assert_eq!(table.len(), 2);
+
+table.remove("10.0.0.0/8".parse().unwrap());
+assert_eq!(table.len(), 1);
+```
+
+### `iter()` and `for (prefix, value) in &table`
+
+Returns an iterator over all `(IpPrefix<A>, &V)` pairs. The table also implements `IntoIterator` for shared references, so standard `for` loop syntax works directly.
+
+```rust
+# use iplookup::IpTable;
+# use std::net::Ipv4Addr;
+# let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+
+// for-loop syntax via IntoIterator
+for (prefix, value) in &table {
+    let _ = (prefix, value); // prefix: IpPrefix<Ipv4Addr>, value: &&str
+}
+
+// Collect all entries into a Vec, sorted by prefix length
+let mut entries: Vec<_> = table.iter().collect();
+entries.sort_by_key(|(p, _)| p.mask());
+assert_eq!(entries[0].1, &"broad");    // /8 comes first
+assert_eq!(entries[1].1, &"specific"); // /16 comes second
+```
+
 ---
 
 ## Performance
