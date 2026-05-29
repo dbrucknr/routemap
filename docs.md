@@ -174,3 +174,6 @@ address are irrelevant for this prefix.
   "Node is now empty" means: node.value.is_none() && node.children[0].is_none() && node.children[1].is_none()
 
   The public remove method calls the recursive helper and ignores the prune signal for the root — the root node is never deleted, it always stays.
+
+I think I want to switch to this:
+- https://github.com/hroi/treebitmap

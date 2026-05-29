@@ -1,12 +1,14 @@
-pub(crate) struct TrieNode<V> {
-    pub(crate) children: [Option<Box<TrieNode<V>>>; 2],
+pub(crate) const NULL: u32 = u32::MAX;
+
+pub(crate) struct ArenaNode<V> {
+    pub(crate) children: [u32; 2],
     pub(crate) value: Option<V>,
 }
 
-impl<V> TrieNode<V> {
+impl<V> ArenaNode<V> {
     pub(crate) fn new() -> Self {
         Self {
-            children: [None, None],
+            children: [NULL, NULL],
             value: None,
         }
     }

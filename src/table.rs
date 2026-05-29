@@ -1,4 +1,4 @@
-use crate::node::TrieNode;
+use crate::node::{ArenaNode, NULL};
 use ipnetx::{interfaces::IpAddress, prefix::IpPrefix};
 use std::marker::PhantomData;
 
@@ -42,9 +42,10 @@ use std::marker::PhantomData;
 /// assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), None);
 /// ```
 pub struct IpTable<A: IpAddress, V> {
-    root: TrieNode<V>,
+    nodes: Vec<ArenaNode<V>>,
     _marker: PhantomData<A>,
 }
+
 impl<A: IpAddress, V> IpTable<A, V> {
     /// Creates a new, empty LPM table.
     ///
@@ -58,7 +59,7 @@ impl<A: IpAddress, V> IpTable<A, V> {
     /// ```
     pub fn new() -> Self {
         Self {
-            root: TrieNode::new(),
+            nodes: vec![ArenaNode::new()], // index 0 is always the root
             _marker: PhantomData,
         }
     }
@@ -92,20 +93,24 @@ impl<A: IpAddress, V> IpTable<A, V> {
     pub fn insert(&mut self, prefix: IpPrefix<A>, value: V) {
         let prefix = prefix.masked();
         let addr = prefix.ip().to_u128();
-        let len = prefix.mask() as u32; // Prefix length
-        let mut node = &mut self.root;
+        let len = prefix.mask() as u32;
+        let mut cur = 0usize;
 
         for depth in 0..len {
-            //  1. Extract the current bit — this is the left/right decision at this depth
             let bit = ((addr >> (A::BITS as u32 - 1 - depth)) & 1) as usize;
-
-            // 2. Create the child if it doesn't exist
-            node = node.children[bit]
-                .get_or_insert_with(|| Box::new(TrieNode::new()))
-                .as_mut();
+            let child_idx = self.nodes[cur].children[bit];
+            let next = if child_idx == NULL {
+                let new_idx = self.nodes.len() as u32;
+                self.nodes.push(ArenaNode::new());
+                self.nodes[cur].children[bit] = new_idx;
+                new_idx as usize
+            } else {
+                child_idx as usize
+            };
+            cur = next;
         }
 
-        node.value = Some(value);
+        self.nodes[cur].value = Some(value);
     }
 
     /// Returns a reference to the value for the most specific prefix that contains
@@ -140,23 +145,22 @@ impl<A: IpAddress, V> IpTable<A, V> {
     /// assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), Some(&"default"));
     /// ```
     pub fn longest_match(&self, addr: A) -> Option<&V> {
-        let addr = addr.to_u128(); // The bits to walk
-        let mut node = &self.root;
-        let mut best = node.value.as_ref(); // handles a /0 prefix at root
+        let addr = addr.to_u128();
+        let mut cur = 0usize;
+        let mut best = self.nodes[0].value.as_ref();
 
         for depth in 0..A::BITS as u32 {
             let bit = ((addr >> (A::BITS as u32 - 1 - depth)) & 1) as usize;
-            if let Some(child) = node.children[bit].as_deref() {
-                // Advance the node
-                node = child;
-                // Update 'best' if this node has a value
-                if let Some(value) = child.value.as_ref() {
-                    best = Some(value);
-                }
-            } else {
+            let child_idx = self.nodes[cur].children[bit];
+            if child_idx == NULL {
                 break;
             }
+            cur = child_idx as usize;
+            if let Some(v) = self.nodes[cur].value.as_ref() {
+                best = Some(v);
+            }
         }
+
         best
     }
 
@@ -192,12 +196,12 @@ impl<A: IpAddress, V> IpTable<A, V> {
     pub fn remove(&mut self, prefix: IpPrefix<A>) -> Option<V> {
         let prefix = prefix.masked();
         let (value, _) = Self::remove_recursive(
-            &mut self.root,
+            &mut self.nodes,
+            0,
             prefix.ip().to_u128(),
             0,
             prefix.mask() as u32,
         );
-
         value
     }
 
@@ -229,53 +233,59 @@ impl<A: IpAddress, V> IpTable<A, V> {
     /// assert!(!table.contains("10.20.0.0/16".parse().unwrap()));
     /// ```
     pub fn contains(&self, prefix: IpPrefix<A>) -> bool {
-        let mut node = &self.root;
         let prefix = prefix.masked();
         let addr = prefix.ip().to_u128();
-        let len = prefix.mask() as u32; // Prefix length
+        let len = prefix.mask() as u32;
+        let mut cur = 0usize;
 
         for depth in 0..len {
             let bit = ((addr >> (A::BITS as u32 - 1 - depth)) & 1) as usize;
-            if let Some(child) = node.children[bit].as_deref() {
-                node = child
-            } else {
+            let child_idx = self.nodes[cur].children[bit];
+            if child_idx == NULL {
                 return false;
             }
+            cur = child_idx as usize;
         }
 
-        node.value.is_some()
+        self.nodes[cur].value.is_some()
     }
 
     // Recursion depth is bounded by A::BITS — 32 for IPv4, 128 for IPv6.
     // This is a hard constant regardless of table size, so stack overflow is
     // not a concern even for very large tables.
     fn remove_recursive(
-        node: &mut TrieNode<V>,
+        nodes: &mut Vec<ArenaNode<V>>,
+        cur: u32,
         addr: u128,
         depth: u32,
         target_depth: u32,
     ) -> (Option<V>, bool) {
         if depth == target_depth {
-            let value = node.value.take();
-            let empty = node.children[0].is_none() && node.children[1].is_none();
+            let value = nodes[cur as usize].value.take();
+            let empty = nodes[cur as usize].children[0] == NULL
+                && nodes[cur as usize].children[1] == NULL;
             return (value, empty);
         }
 
         let bit = ((addr >> (A::BITS as u32 - 1 - depth)) & 1) as usize;
+        let child_idx = nodes[cur as usize].children[bit];
 
-        if let Some(child) = node.children[bit].as_deref_mut() {
-            let (value, prune_child) = Self::remove_recursive(child, addr, depth + 1, target_depth);
-            if prune_child {
-                node.children[bit] = None;
-            }
-
-            let this_empty =
-                node.value.is_none() && node.children[0].is_none() && node.children[1].is_none();
-
-            (value, this_empty)
-        } else {
-            (None, false)
+        if child_idx == NULL {
+            return (None, false);
         }
+
+        let (value, prune_child) =
+            Self::remove_recursive(nodes, child_idx, addr, depth + 1, target_depth);
+
+        if prune_child {
+            nodes[cur as usize].children[bit] = NULL;
+        }
+
+        let this_empty = nodes[cur as usize].value.is_none()
+            && nodes[cur as usize].children[0] == NULL
+            && nodes[cur as usize].children[1] == NULL;
+
+        (value, this_empty)
     }
 }
 
