@@ -1,11 +1,11 @@
 [package]
-name = "iplookup"
+name = "routemap"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.86"
-description = "In-memory Longest Prefix Match (LPM) routing tables for IPv4 and IPv6, built on ipnetx."
+description = "Fast in-memory IP prefix routing tables for IPv4 and IPv6. Longest Prefix Match via stride-4 treebitmap, built on ipnetx."
 license = "MIT"
-repository = "https://github.com/dbrucknr/iplookup"
+repository = "https://github.com/dbrucknr/routemap"
 readme = "README.md"
 keywords = ["ip", "network", "routing", "lpm", "cidr"]
 categories = ["network-programming", "data-structures"]

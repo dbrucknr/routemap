@@ -1,15 +1,15 @@
-# iplookup
+# routemap
 
 Fast, in-memory **Longest Prefix Match (LPM)** routing tables for IPv4 and IPv6 in Rust.
 
-[![Crates.io](https://img.shields.io/crates/v/iplookup.svg)](https://crates.io/crates/iplookup)
-[![Docs.rs](https://docs.rs/iplookup/badge.svg)](https://docs.rs/iplookup/latest/iplookup/)
+[![Crates.io](https://img.shields.io/crates/v/routemap.svg)](https://crates.io/crates/routemap)
+[![Docs.rs](https://docs.rs/routemap/badge.svg)](https://docs.rs/routemap/latest/routemap/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![codecov](https://codecov.io/gh/dbrucknr/iplookup/graph/badge.svg)](https://codecov.io/gh/dbrucknr/iplookup)
+[![codecov](https://codecov.io/gh/dbrucknr/routemap/graph/badge.svg)](https://codecov.io/gh/dbrucknr/routemap)
 
 ```toml
 [dependencies]
-iplookup = "0.1"
+routemap = "0.1"
 ```
 
 ---
@@ -17,10 +17,10 @@ iplookup = "0.1"
 ## Quick Start
 
 ```rust
-use iplookup::IpTable;
+use routemap::RouteMap;
 use std::net::Ipv4Addr;
 
-let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
 
 table.insert("10.0.0.0/8".parse().unwrap(),    "datacenter");
 table.insert("10.20.0.0/16".parse().unwrap(),  "third-floor");
@@ -64,7 +64,7 @@ This is Longest Prefix Match. It is the core lookup rule behind:
 
 **Software routers and network daemons.** Any process that needs to forward or classify packets by destination — userspace routers, VPN daemons, SDN data planes, traffic shapers. These workloads build a table once from a configuration or BGP feed and then perform millions of lookups per second. The treebitmap's lookup throughput (25–47 M/s at 100k prefixes) is designed exactly for this shape.
 
-**Firewall and ACL evaluation.** A firewall rule set is an LPM table where the value is a policy action (allow, deny, rate-limit). The most specific matching prefix wins — the same rule as routing. `iplookup` evaluates the table in one pass with no per-lookup allocation, which matters when rules are evaluated on every packet.
+**Firewall and ACL evaluation.** A firewall rule set is an LPM table where the value is a policy action (allow, deny, rate-limit). The most specific matching prefix wins — the same rule as routing. `routemap` evaluates the table in one pass with no per-lookup allocation, which matters when rules are evaluated on every packet.
 
 **GeoIP and ASN classification.** Mapping arbitrary IP addresses to countries, regions, or autonomous systems means maintaining a table of tens of thousands of IP prefixes and looking up each inbound request. The table is loaded once at startup and read continuously — again, the treebitmap's read-heavy profile fits well.
 
@@ -82,13 +82,13 @@ A `HashMap<IpAddr, Route>` can only tell you whether an exact IP address was ins
 
 To simulate LPM with a hash map you would need to probe all 32 possible prefix lengths for IPv4 (or 128 for IPv6) on every lookup, rebuild the prefix from the address at each length, and then pick the longest match yourself. That is O(W) hash lookups with high constant overhead and no spatial locality.
 
-`iplookup` answers the question directly, with one pass and no per-lookup allocation.
+`routemap` answers the question directly, with one pass and no per-lookup allocation.
 
 ---
 
 ## The Full API
 
-### `IpTable<A, V>`
+### `RouteMap<A, V>`
 
 The table type has two type parameters:
 
@@ -96,10 +96,10 @@ The table type has two type parameters:
 - **`V`** — whatever you want to store alongside each prefix: route entries, ASN numbers, country codes, rule IDs, anything.
 
 ```rust
-use iplookup::IpTable;
+use routemap::RouteMap;
 use std::net::Ipv4Addr;
 
-let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+let mut table: RouteMap<Ipv4Addr, u32> = RouteMap::new();
 ```
 
 ### `insert(prefix, value)`
@@ -107,9 +107,9 @@ let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
 Adds or replaces the entry for a prefix. Host bits in the address are silently ignored — `10.99.0.0/8` and `10.0.0.0/8` are the same prefix.
 
 ```rust
-# use iplookup::IpTable;
+# use routemap::RouteMap;
 # use std::net::Ipv4Addr;
-# let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+# let mut table: RouteMap<Ipv4Addr, u32> = RouteMap::new();
 table.insert("10.0.0.0/8".parse().unwrap(), 42);
 table.insert("10.0.0.0/8".parse().unwrap(), 99); // replaces 42
 ```
@@ -119,9 +119,9 @@ table.insert("10.0.0.0/8".parse().unwrap(), 99); // replaces 42
 Returns a shared reference to the value for the most specific matching prefix, or `None` if no prefix covers the address.
 
 ```rust
-# use iplookup::IpTable;
+# use routemap::RouteMap;
 # use std::net::Ipv4Addr;
-# let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+# let mut table: RouteMap<Ipv4Addr, u32> = RouteMap::new();
 # table.insert("10.0.0.0/8".parse().unwrap(), 99);
 assert_eq!(table.longest_match("10.1.2.3".parse().unwrap()), Some(&99));
 assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), None);
@@ -132,9 +132,9 @@ assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), None);
 Returns `true` if the exact prefix was inserted. This is an exact match, not a longest-prefix match — it does not return `true` just because an address within the prefix would match via `longest_match`.
 
 ```rust
-# use iplookup::IpTable;
+# use routemap::RouteMap;
 # use std::net::Ipv4Addr;
-# let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+# let mut table: RouteMap<Ipv4Addr, u32> = RouteMap::new();
 table.insert("10.0.0.0/8".parse().unwrap(), 1);
 
 assert!(table.contains("10.0.0.0/8".parse().unwrap()));   // exact match — true
@@ -146,9 +146,9 @@ assert!(!table.contains("10.20.0.0/16".parse().unwrap())); // never inserted —
 Removes a prefix and returns its value. Returns `None` if the prefix was not in the table. Removing a broad prefix does not affect more specific prefixes nested beneath it.
 
 ```rust
-# use iplookup::IpTable;
+# use routemap::RouteMap;
 # use std::net::Ipv4Addr;
-# let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+# let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
 table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
 table.insert("10.20.0.0/16".parse().unwrap(), "specific");
 
@@ -164,9 +164,9 @@ assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), None);
 `len` returns the number of prefix entries in the table in O(1) time. `is_empty` returns `true` when the table has no entries.
 
 ```rust
-# use iplookup::IpTable;
+# use routemap::RouteMap;
 # use std::net::Ipv4Addr;
-# let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+# let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
 assert!(table.is_empty());
 
 table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
@@ -186,9 +186,9 @@ assert_eq!(table.len(), 1);
 Returns an iterator over all `(IpPrefix<A>, &V)` pairs. The table also implements `IntoIterator` for shared references, so standard `for` loop syntax works directly.
 
 ```rust
-# use iplookup::IpTable;
+# use routemap::RouteMap;
 # use std::net::Ipv4Addr;
-# let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+# let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
 table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
 table.insert("10.20.0.0/16".parse().unwrap(), "specific");
 
@@ -266,7 +266,7 @@ See [`treebitmap.md`](treebitmap.md) at the repo root for a step-by-step walkthr
 
 ## Relationship to `ipnetx`
 
-`iplookup` uses [`IpPrefix<A>`](https://crates.io/crates/ipnetx) from the `ipnetx` crate as its key type. You do not need to know the internals of `ipnetx` to use `iplookup` — CIDR string parsing is all you need:
+`routemap` uses [`IpPrefix<A>`](https://crates.io/crates/ipnetx) from the `ipnetx` crate as its key type. You do not need to know the internals of `ipnetx` to use `routemap` — CIDR string parsing is all you need:
 
 ```rust
 # use ipnetx::prefix::IpPrefix;
@@ -277,9 +277,9 @@ let prefix: IpPrefix<Ipv4Addr> = "10.0.0.0/8".parse().unwrap();
 The two crates answer different questions and are designed to compose:
 
 - **`ipnetx`** reasons about *regions* of IP address space as mathematical sets — union, intersection, difference, complement. Use it to build, validate, and manipulate collections of prefixes.
-- **`iplookup`** classifies *individual addresses* against a table of prefixes at lookup speed. Use it to answer "which rule covers this packet?" at runtime.
+- **`routemap`** classifies *individual addresses* against a table of prefixes at lookup speed. Use it to answer "which rule covers this packet?" at runtime.
 
-A typical pipeline: use `ipnetx` to aggregate and deduplicate a raw prefix list (collapsing overlapping or adjacent entries), then load the result into an `iplookup` table for classification. `ipnetx` handles the set algebra once at build time; `iplookup` handles the per-packet lookups at runtime.
+A typical pipeline: use `ipnetx` to aggregate and deduplicate a raw prefix list (collapsing overlapping or adjacent entries), then load the result into an `routemap` table for classification. `ipnetx` handles the set algebra once at build time; `routemap` handles the per-packet lookups at runtime.
 
 ---
 

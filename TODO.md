@@ -1,4 +1,4 @@
-# iplookup — Implementation Plan
+# routemap — Implementation Plan
 
 This document is both a roadmap and a learning guide. Each phase builds on the last.
 Take as much time as needed between steps — understanding *why* each piece exists
@@ -59,7 +59,7 @@ With the node structure in place, we implement the two operations the entire cra
 is built around. Everything else is API surface on top of these.
 
 ### 3.1 `insert(prefix: IpPrefix<A>, value: V)`
-- [x] Create `src/table.rs` with the `IpTable<V>` struct (owns the root node)
+- [x] Create `src/table.rs` with the `RouteMap<V>` struct (owns the root node)
 - [x] Implement `insert`: walk the trie bit by bit for `prefix_len` steps, creating
       child nodes as needed, then store `value` at the final node
 
@@ -160,9 +160,9 @@ layout, traversal must decode internal bitmap positions back into prefix lengths
 ---
 
 ### 7.2 Standard trait implementations
-- [x] `impl Default for IpTable<A, V>`
-- [x] `impl Debug for IpTable<A, V> where A: Display, V: Debug` — renders as `{"10.0.0.0/8": value, ...}`
-- [x] `impl FromIterator<(IpPrefix<A>, V)> for IpTable<A, V>` — allows `collect()` into a table
+- [x] `impl Default for RouteMap<A, V>`
+- [x] `impl Debug for RouteMap<A, V> where A: Display, V: Debug` — renders as `{"10.0.0.0/8": value, ...}`
+- [x] `impl FromIterator<(IpPrefix<A>, V)> for RouteMap<A, V>` — allows `collect()` into a table
 - [x] ArenaTable removed from public API — unexported in v0.1 (no iter(), no doc comments,
       deferred to v0.2 with feature parity)
 
@@ -171,7 +171,7 @@ layout, traversal must decode internal bitmap positions back into prefix lengths
 ### 7.3 Documentation
 - [x] Doc comments on all public types and methods, each with at least one `# Example`
       doctest (verified passing with `cargo test`)
-- [x] `# Performance` section on `IpTable` struct documenting the insert/lookup
+- [x] `# Performance` section on `RouteMap` struct documenting the insert/lookup
       trade-off with real benchmark numbers
 - [x] README rewritten: Quick Start, full API reference, real benchmarks, treebitmap
       explainer, "Why Not a HashMap?", "Common Mistakes"
@@ -181,7 +181,7 @@ layout, traversal must decode internal bitmap positions back into prefix lengths
 
 ### 7.4 `serde` support
 - [ ] Add `serde` as an optional dependency behind a `serde` feature flag
-- [ ] Implement `Serialize` / `Deserialize` for `IpTable<A, V> where V: Serialize + DeserializeOwned`
+- [ ] Implement `Serialize` / `Deserialize` for `RouteMap<A, V> where V: Serialize + DeserializeOwned`
 - [ ] Add a feature-gated doc example showing round-trip through `serde_json`
 
 **What to watch for:** Serialize as a flat list of `{ prefix, value }` records and
@@ -195,7 +195,7 @@ structure — that would couple the wire format to the implementation.
 - [ ] `cargo doc --open` — documentation looks correct
 - [ ] `cargo publish --dry-run` — no packaging errors
 - [ ] `cargo publish`
-- [ ] Update the `ipnetx` README to cross-reference `iplookup`
+- [ ] Update the `ipnetx` README to cross-reference `routemap`
 
 ---
 

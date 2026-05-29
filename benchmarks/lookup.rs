@@ -3,7 +3,7 @@
 // HTML reports: target/criterion/report/index.html
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
-use iplookup::IpTable;
+use routemap::RouteMap;
 use ipnetx::prefix::IpPrefix;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -76,7 +76,7 @@ fn bench_insert_ipv4(c: &mut Criterion) {
                 b.iter_batched(
                     || prefixes.clone(),
                     |prefixes| {
-                        let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+                        let mut table: RouteMap<Ipv4Addr, u32> = RouteMap::new();
                         for (i, prefix) in prefixes.into_iter().enumerate() {
                             table.insert(prefix, i as u32);
                         }
@@ -102,7 +102,7 @@ fn bench_insert_ipv6(c: &mut Criterion) {
                 b.iter_batched(
                     || prefixes.clone(),
                     |prefixes| {
-                        let mut table: IpTable<Ipv6Addr, u32> = IpTable::new();
+                        let mut table: RouteMap<Ipv6Addr, u32> = RouteMap::new();
                         for (i, prefix) in prefixes.into_iter().enumerate() {
                             table.insert(prefix, i as u32);
                         }
@@ -125,7 +125,7 @@ fn bench_insert_ipv6(c: &mut Criterion) {
 fn bench_lookup_ipv4(c: &mut Criterion) {
     let mut group = c.benchmark_group("lookup/ipv4");
     for &size in &SIZES {
-        let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+        let mut table: RouteMap<Ipv4Addr, u32> = RouteMap::new();
         for (i, prefix) in ipv4_prefixes(size).into_iter().enumerate() {
             table.insert(prefix, i as u32);
         }
@@ -146,7 +146,7 @@ fn bench_lookup_ipv4(c: &mut Criterion) {
 fn bench_lookup_ipv6(c: &mut Criterion) {
     let mut group = c.benchmark_group("lookup/ipv6");
     for &size in &SIZES {
-        let mut table: IpTable<Ipv6Addr, u32> = IpTable::new();
+        let mut table: RouteMap<Ipv6Addr, u32> = RouteMap::new();
         for (i, prefix) in ipv6_prefixes(size).into_iter().enumerate() {
             table.insert(prefix, i as u32);
         }

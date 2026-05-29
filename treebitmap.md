@@ -222,7 +222,7 @@ fn rank(bitmap: u32, position: u32) -> usize {
 }
 ```
 
-Get this tested in isolation before touching `IpTable`. Any bug here silently
+Get this tested in isolation before touching `RouteMap`. Any bug here silently
 corrupts every insert and lookup.
 
 ---
