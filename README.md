@@ -4,7 +4,7 @@ Fast, in-memory **Longest Prefix Match (LPM)** routing tables for IPv4 and IPv6 
 
 [![Crates.io](https://img.shields.io/crates/v/routemap.svg)](https://crates.io/crates/routemap)
 [![Docs.rs](https://docs.rs/routemap/badge.svg)](https://docs.rs/routemap/latest/routemap/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/dbrucknr/routemap/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/dbrucknr/routemap/graph/badge.svg)](https://codecov.io/gh/dbrucknr/routemap)
 
 ```toml
