@@ -36,7 +36,7 @@ For IPv6, swap `Ipv4Addr` for `Ipv6Addr` and use IPv6 CIDR notation — everythi
 
 When a router receives a packet for `192.168.1.57`, its routing table might contain several entries that all technically match:
 
-```
+```text
 0.0.0.0/0       → default gateway
 192.168.0.0/16  → office network
 192.168.1.0/24  → third-floor subnet
@@ -102,6 +102,9 @@ let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
 Adds or replaces the entry for a prefix. Host bits in the address are silently ignored — `10.99.0.0/8` and `10.0.0.0/8` are the same prefix.
 
 ```rust
+# use iplookup::IpTable;
+# use std::net::Ipv4Addr;
+# let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
 table.insert("10.0.0.0/8".parse().unwrap(), 42);
 table.insert("10.0.0.0/8".parse().unwrap(), 99); // replaces 42
 ```
@@ -111,6 +114,10 @@ table.insert("10.0.0.0/8".parse().unwrap(), 99); // replaces 42
 Returns a shared reference to the value for the most specific matching prefix, or `None` if no prefix covers the address.
 
 ```rust
+# use iplookup::IpTable;
+# use std::net::Ipv4Addr;
+# let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+# table.insert("10.0.0.0/8".parse().unwrap(), 99);
 assert_eq!(table.longest_match("10.1.2.3".parse().unwrap()), Some(&99));
 assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), None);
 ```
@@ -120,6 +127,9 @@ assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), None);
 Returns `true` if the exact prefix was inserted. This is an exact match, not a longest-prefix match — it does not return `true` just because an address within the prefix would match via `longest_match`.
 
 ```rust
+# use iplookup::IpTable;
+# use std::net::Ipv4Addr;
+# let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
 table.insert("10.0.0.0/8".parse().unwrap(), 1);
 
 assert!(table.contains("10.0.0.0/8".parse().unwrap()));   // exact match — true
@@ -131,6 +141,9 @@ assert!(!table.contains("10.20.0.0/16".parse().unwrap())); // never inserted —
 Removes a prefix and returns its value. Returns `None` if the prefix was not in the table. Removing a broad prefix does not affect more specific prefixes nested beneath it.
 
 ```rust
+# use iplookup::IpTable;
+# use std::net::Ipv4Addr;
+# let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
 table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
 table.insert("10.20.0.0/16".parse().unwrap(), "specific");
 
@@ -190,7 +203,7 @@ The treebitmap (Eatherton, Varghese, Bhatt — 2004) processes 4 bits per node (
 
 Finding a value or child in the `Vec` uses a single `POPCNT` instruction:
 
-```
+```text
 index = (bitmap & ((1 << position) - 1)).count_ones()
 ```
 
@@ -205,6 +218,8 @@ See [`treebitmap.md`](treebitmap.md) at the repo root for a step-by-step walkthr
 `iplookup` uses [`IpPrefix<A>`](https://crates.io/crates/ipnetx) from the `ipnetx` crate as its key type. You do not need to know the internals of `ipnetx` to use `iplookup` — CIDR string parsing is all you need:
 
 ```rust
+# use ipnetx::prefix::IpPrefix;
+# use std::net::Ipv4Addr;
 let prefix: IpPrefix<Ipv4Addr> = "10.0.0.0/8".parse().unwrap();
 ```
 

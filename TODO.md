@@ -170,7 +170,7 @@ layout, traversal must decode internal bitmap positions back into prefix lengths
       trade-off with real benchmark numbers
 - [x] README rewritten: Quick Start, full API reference, real benchmarks, treebitmap
       explainer, "Why Not a HashMap?", "Common Mistakes"
-- [ ] Add `#[doc = include_str!("../README.md")]` to `lib.rs` so docs.rs renders the README
+- [x] Add `#[doc = include_str!("../README.md")]` to `lib.rs` so docs.rs renders the README
 
 ---
 
@@ -217,7 +217,7 @@ structure — that would couple the wire format to the implementation.
     ↓
 7.1 iter()                                      ← next
 7.2 Trait impls (Default, Debug, FromIterator)
-7.3 Documentation                               ✓ (partial — README done, lib.rs include pending)
+7.3 Documentation                               ✓
 7.4 serde support
 7.5 Publish
 ```
