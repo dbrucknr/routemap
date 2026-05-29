@@ -227,14 +227,22 @@ corrupts every insert and lookup.
 
 ---
 
-## Baseline benchmark results (binary trie, arena-based)
+## Benchmark results
 
-Recorded 2026-05-28 on Apple M2 Max, Rust 1.94.0. Full results in BENCHMARKS.md.
+Recorded 2026-05-29 on Apple M2 Max, Rust 1.94.0. Full results in BENCHMARKS.md.
+
+### Lookup throughput at 100k prefixes
 
 | | IPv4 thrpt | IPv6 thrpt |
 |---|---|---|
-| Insert 100k | 14.0 M/s | 3.9 M/s |
-| Lookup 100k | 18.6 M/s | 13.4 M/s |
+| Binary trie (baseline) | 18.6 M/s | 13.4 M/s |
+| Treebitmap (stride-4)  | 25.1 M/s | 47.4 M/s |
+| Speedup                | **1.35×** | **3.54×** |
 
-The sharp throughput drop from 1k → 100k (lookup IPv4: 70M/s → 19M/s) is cache
-pressure — the primary problem treebitmap is designed to solve.
+IPv6 benefits far more: the binary trie makes up to 128 hops for a /128;
+treebitmap caps at 32. At 100k prefixes (mostly L3 cache misses), cutting hops
+by 4× produces a 3.5× wall-clock speedup. IPv4 gains are more modest (max hops
+32 → 8) at 1.35×.
+
+Insert is 2× slower at small sizes due to `Vec::insert()` cost for keeping the
+compact arrays sorted, but converges to ≈ parity at 100k prefixes.

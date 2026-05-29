@@ -20,8 +20,9 @@ fn rank(bitmap: u32, position: u32) -> usize {
 }
 
 /// An in-memory Longest Prefix Match (LPM) routing table backed by a stride-4
-/// treebitmap. Compared to a binary trie, each node processes 4 bits at once,
-/// reducing the number of cache misses on large tables by 4×.
+/// treebitmap. Each node processes 4 bits at once instead of 1, which cuts the
+/// maximum number of pointer hops from 32 → 8 (IPv4) and 128 → 32 (IPv6) and
+/// dramatically reduces cache pressure on large tables.
 ///
 /// An LPM table maps IP network prefixes — like `10.0.0.0/8` or `192.168.1.0/24` —
 /// to values of any type `V`. When you look up an IP address, the table returns the
@@ -32,6 +33,28 @@ fn rank(bitmap: u32, position: u32) -> usize {
 /// - `A` — the address family: [`Ipv4Addr`](std::net::Ipv4Addr) or
 ///   [`Ipv6Addr`](std::net::Ipv6Addr). A single table is dedicated to one family.
 /// - `V` — the value stored alongside each prefix.
+///
+/// # Performance
+///
+/// **Lookup** is the primary strength. At 100k prefixes on an M2 Max:
+///
+/// | | IPv4 | IPv6 |
+/// |---|---|---|
+/// | Throughput | 25 M lookups/s | 47 M lookups/s |
+/// | vs. binary trie | 1.35× faster | 3.54× faster |
+///
+/// IPv6 benefits most: the binary trie makes up to 128 pointer hops for a /128;
+/// the treebitmap caps this at 32. Each hop is a potential cache miss at scale,
+/// so the 4× reduction in hops translates almost directly to a 3.5× speedup.
+///
+/// **Insert** has a cost: each node stores values and children in compact `Vec`s
+/// (no empty slots), so inserting into a populated node requires a `Vec::insert()`
+/// to shift elements. At small table sizes this makes insert ~2× slower than a
+/// binary trie. The cost converges to parity around 100k prefixes, where the
+/// average number of values per node approaches 1 and shifts are rare.
+///
+/// **Use this table when lookups dominate.** If your workload is insert-heavy and
+/// tables stay small (< 10k prefixes), a plain binary trie may be faster overall.
 ///
 /// # Example
 ///
