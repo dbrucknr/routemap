@@ -160,9 +160,11 @@ layout, traversal must decode internal bitmap positions back into prefix lengths
 ---
 
 ### 7.2 Standard trait implementations
-- [ ] `impl Default for IpTable<A, V>`
-- [ ] `impl Debug for IpTable<A, V> where V: Debug`
-- [ ] `impl FromIterator<(IpPrefix<A>, V)> for IpTable<A, V>` — allows `collect()` into a table
+- [x] `impl Default for IpTable<A, V>`
+- [x] `impl Debug for IpTable<A, V> where A: Display, V: Debug` — renders as `{"10.0.0.0/8": value, ...}`
+- [x] `impl FromIterator<(IpPrefix<A>, V)> for IpTable<A, V>` — allows `collect()` into a table
+- [x] ArenaTable removed from public API — unexported in v0.1 (no iter(), no doc comments,
+      deferred to v0.2 with feature parity)
 
 ---
 
@@ -219,7 +221,7 @@ structure — that would couple the wire format to the implementation.
 6.3 Implement treebitmap + benchmark comparison ✓
     ↓
 7.1 iter()                                      ✓
-7.2 Trait impls (Default, Debug, FromIterator)
+7.2 Trait impls (Default, Debug, FromIterator)  ✓
 7.3 Documentation                               ✓
 7.4 serde support
 7.5 Publish

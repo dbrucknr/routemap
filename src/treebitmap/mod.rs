@@ -1,4 +1,5 @@
 use ipnetx::{interfaces::IpAddress, prefix::IpPrefix};
+use std::fmt;
 use std::marker::PhantomData;
 
 mod node;
@@ -267,6 +268,22 @@ impl<A: IpAddress, V> IpTable<A, V> {
         }
     }
 
+    /// Returns `true` if the table contains an exact entry for this prefix.
+    ///
+    /// This is an exact match — not a longest-prefix match. Host bits are ignored.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iplookup::IpTable;
+    /// use std::net::Ipv4Addr;
+    ///
+    /// let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+    /// table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+    ///
+    /// assert!(table.contains("10.0.0.0/8".parse().unwrap()));
+    /// assert!(!table.contains("10.20.0.0/16".parse().unwrap()));
+    /// ```
     pub fn contains(&self, prefix: IpPrefix<A>) -> bool {
         let prefix = prefix.masked();
         let addr = prefix.ip().to_u128();
@@ -279,6 +296,33 @@ impl<A: IpAddress, V> IpTable<A, V> {
             len / STRIDE,
             len % STRIDE,
         )
+    }
+}
+
+impl<A: IpAddress, V> Default for IpTable<A, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<A: IpAddress + fmt::Display, V: fmt::Debug> fmt::Debug for IpTable<A, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut map = f.debug_map();
+        for (prefix, value) in self.iter() {
+            let key = format!("{}/{}", prefix.ip(), prefix.mask());
+            map.entry(&key, value);
+        }
+        map.finish()
+    }
+}
+
+impl<A: IpAddress, V> FromIterator<(IpPrefix<A>, V)> for IpTable<A, V> {
+    fn from_iter<I: IntoIterator<Item = (IpPrefix<A>, V)>>(iter: I) -> Self {
+        let mut table = Self::new();
+        for (prefix, value) in iter {
+            table.insert(prefix, value);
+        }
+        table
     }
 }
 
@@ -1034,5 +1078,73 @@ mod tests {
         let entries = sorted_entries(&table);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0], ("10.20.0.0/16".to_string(), "specific"));
+    }
+
+    // ── Default ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn default_produces_empty_table() {
+        let table: IpTable<Ipv4Addr, &str> = IpTable::default();
+        assert_eq!(table.iter().count(), 0);
+        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), None);
+    }
+
+    // ── Debug ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn debug_empty_table() {
+        let table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        assert_eq!(format!("{:?}", table), "{}");
+    }
+
+    #[test]
+    fn debug_contains_prefix_and_value() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "datacenter");
+        let output = format!("{:?}", table);
+        assert!(output.contains("10.0.0.0/8"), "output was: {output}");
+        assert!(output.contains("datacenter"), "output was: {output}");
+    }
+
+    #[test]
+    fn debug_ipv6() {
+        let mut table: IpTable<Ipv6Addr, u32> = IpTable::new();
+        table.insert("2001:db8::/32".parse().unwrap(), 42);
+        let output = format!("{:?}", table);
+        assert!(output.contains("2001:db8::/32"), "output was: {output}");
+        assert!(output.contains("42"), "output was: {output}");
+    }
+
+    // ── FromIterator ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn collect_from_iterator() {
+        use ipnetx::prefix::IpPrefix;
+        let pairs: Vec<(IpPrefix<Ipv4Addr>, &str)> = vec![
+            ("10.0.0.0/8".parse().unwrap(),   "broad"),
+            ("10.20.0.0/16".parse().unwrap(), "specific"),
+        ];
+        let table: IpTable<Ipv4Addr, &str> = pairs.into_iter().collect();
+        assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"specific"));
+        assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(table.iter().count(), 2);
+    }
+
+    #[test]
+    fn iter_collect_round_trip() {
+        let mut original: IpTable<Ipv4Addr, u32> = IpTable::new();
+        original.insert("0.0.0.0/0".parse().unwrap(),    0);
+        original.insert("10.0.0.0/8".parse().unwrap(),   1);
+        original.insert("10.20.0.0/16".parse().unwrap(), 2);
+        original.insert("192.168.0.0/16".parse().unwrap(), 3);
+
+        let restored: IpTable<Ipv4Addr, u32> =
+            original.iter().map(|(p, &v)| (p, v)).collect();
+
+        assert_eq!(restored.iter().count(), 4);
+        assert_eq!(restored.longest_match("10.20.5.1".parse().unwrap()), Some(&2));
+        assert_eq!(restored.longest_match("10.99.0.1".parse().unwrap()), Some(&1));
+        assert_eq!(restored.longest_match("192.168.1.1".parse().unwrap()), Some(&3));
+        assert_eq!(restored.longest_match("8.8.8.8".parse().unwrap()), Some(&0));
     }
 }
