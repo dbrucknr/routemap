@@ -55,6 +55,22 @@ This is Longest Prefix Match. It is the core lookup rule behind:
 
 ---
 
+## Use Cases
+
+**Software routers and network daemons.** Any process that needs to forward or classify packets by destination — userspace routers, VPN daemons, SDN data planes, traffic shapers. These workloads build a table once from a configuration or BGP feed and then perform millions of lookups per second. The treebitmap's lookup throughput (25–47 M/s at 100k prefixes) is designed exactly for this shape.
+
+**Firewall and ACL evaluation.** A firewall rule set is an LPM table where the value is a policy action (allow, deny, rate-limit). The most specific matching prefix wins — the same rule as routing. `iplookup` evaluates the table in one pass with no per-lookup allocation, which matters when rules are evaluated on every packet.
+
+**GeoIP and ASN classification.** Mapping arbitrary IP addresses to countries, regions, or autonomous systems means maintaining a table of tens of thousands of IP prefixes and looking up each inbound request. The table is loaded once at startup and read continuously — again, the treebitmap's read-heavy profile fits well.
+
+**Threat intelligence and IP reputation.** Blocklists and allowlists are typically expressed as IP prefixes (known Tor exit nodes, cloud provider ranges, known-bad ASNs). Loading these into a table and classifying traffic at the edge is a direct application.
+
+**Traffic observability and classification.** Tagging network flows by segment — "this connection is from the office VPN range", "this source is in the datacenter /16" — for dashboards, billing, or anomaly detection. The value stored alongside each prefix can be anything: a string label, an enum, a numeric tenant ID.
+
+**Cloud infrastructure tooling.** VPC route table simulation, classifying whether a request originates from a cloud provider's IP range, Kubernetes network policy enforcement — these are all LPM problems that appear at the infrastructure layer.
+
+---
+
 ## Why Not a HashMap?
 
 A `HashMap<IpAddr, Route>` can only tell you whether an exact IP address was inserted. It cannot answer "which of my prefixes contains this address?" — because a prefix like `10.0.0.0/8` is not a single address, it is a description of 16 million addresses.
@@ -186,13 +202,18 @@ See [`treebitmap.md`](treebitmap.md) at the repo root for a step-by-step walkthr
 
 ## Relationship to `ipnetx`
 
-`iplookup` uses [`IpPrefix<A>`](https://crates.io/crates/ipnetx) from the `ipnetx` crate as its key type. You do not need to know the internals of `ipnetx` to use `iplookup` — all you need is the CIDR string parsing it provides:
+`iplookup` uses [`IpPrefix<A>`](https://crates.io/crates/ipnetx) from the `ipnetx` crate as its key type. You do not need to know the internals of `ipnetx` to use `iplookup` — CIDR string parsing is all you need:
 
 ```rust
 let prefix: IpPrefix<Ipv4Addr> = "10.0.0.0/8".parse().unwrap();
 ```
 
-If you are already using `ipnetx` for set algebra on IP address space (union, intersection, complement), `iplookup` slots in as the lookup-table companion: `ipnetx` reasons about *regions* of address space as sets; `iplookup` classifies *individual addresses* against those regions at speed.
+The two crates answer different questions and are designed to compose:
+
+- **`ipnetx`** reasons about *regions* of IP address space as mathematical sets — union, intersection, difference, complement. Use it to build, validate, and manipulate collections of prefixes.
+- **`iplookup`** classifies *individual addresses* against a table of prefixes at lookup speed. Use it to answer "which rule covers this packet?" at runtime.
+
+A typical pipeline: use `ipnetx` to aggregate and deduplicate a raw prefix list (collapsing overlapping or adjacent entries), then load the result into an `iplookup` table for classification. `ipnetx` handles the set algebra once at build time; `iplookup` handles the per-packet lookups at runtime.
 
 ---
 
