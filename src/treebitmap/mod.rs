@@ -73,6 +73,7 @@ fn rank(bitmap: u32, position: u32) -> usize {
 /// ```
 pub struct IpTable<A: IpAddress, V> {
     root: TbNode<V>,
+    count: usize,
     _marker: PhantomData<A>,
 }
 
@@ -90,6 +91,7 @@ impl<A: IpAddress, V> IpTable<A, V> {
     pub fn new() -> Self {
         Self {
             root: TbNode::new(),
+            count: 0,
             _marker: PhantomData,
         }
     }
@@ -115,7 +117,7 @@ impl<A: IpAddress, V> IpTable<A, V> {
         let prefix = prefix.masked();
         let addr = prefix.ip().to_u128();
         let len = prefix.mask() as u32;
-        insert_at(
+        let is_new = insert_at(
             &mut self.root,
             addr,
             A::BITS as u32,
@@ -124,6 +126,9 @@ impl<A: IpAddress, V> IpTable<A, V> {
             len % STRIDE,
             value,
         );
+        if is_new {
+            self.count += 1;
+        }
     }
 
     /// Returns a reference to the value for the most specific matching prefix,
@@ -214,6 +219,9 @@ impl<A: IpAddress, V> IpTable<A, V> {
             len / STRIDE,
             len % STRIDE,
         );
+        if value.is_some() {
+            self.count -= 1;
+        }
         value
     }
 
@@ -297,6 +305,41 @@ impl<A: IpAddress, V> IpTable<A, V> {
             len % STRIDE,
         )
     }
+
+    /// Returns the number of prefix entries in the table.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iplookup::IpTable;
+    /// use std::net::Ipv4Addr;
+    ///
+    /// let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+    /// assert_eq!(table.len(), 0);
+    /// table.insert("10.0.0.0/8".parse().unwrap(), "a");
+    /// table.insert("10.20.0.0/16".parse().unwrap(), "b");
+    /// assert_eq!(table.len(), 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    /// Returns `true` if the table contains no entries.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iplookup::IpTable;
+    /// use std::net::Ipv4Addr;
+    ///
+    /// let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+    /// assert!(table.is_empty());
+    /// table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+    /// assert!(!table.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
 }
 
 impl<A: IpAddress, V> Default for IpTable<A, V> {
@@ -326,6 +369,16 @@ impl<A: IpAddress, V> FromIterator<(IpPrefix<A>, V)> for IpTable<A, V> {
     }
 }
 
+impl<'a, A: IpAddress, V> IntoIterator for &'a IpTable<A, V> {
+    type Item = (IpPrefix<A>, &'a V);
+    type IntoIter = Iter<'a, A, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+// Returns true when a new entry was created, false when an existing value was overwritten.
 fn insert_at<V>(
     node: &mut TbNode<V>,
     addr: u128,
@@ -334,7 +387,7 @@ fn insert_at<V>(
     full_hops: u32,
     rel_len: u32,
     value: V,
-) {
+) -> bool {
     if current_hop == full_hops {
         let nib = if rel_len > 0 {
             nibble(addr, addr_bits, current_hop) >> (STRIDE - rel_len)
@@ -345,9 +398,11 @@ fn insert_at<V>(
         let idx = rank(node.internal, bpos);
         if (node.internal >> bpos) & 1 == 1 {
             node.values[idx] = value;
+            false // overwrite
         } else {
             node.values.insert(idx, value);
             node.internal |= 1 << bpos;
+            true // new entry
         }
     } else {
         let nib = nibble(addr, addr_bits, current_hop);
@@ -365,7 +420,7 @@ fn insert_at<V>(
             full_hops,
             rel_len,
             value,
-        );
+        )
     }
 }
 
@@ -1146,5 +1201,87 @@ mod tests {
         assert_eq!(restored.longest_match("10.99.0.1".parse().unwrap()), Some(&1));
         assert_eq!(restored.longest_match("192.168.1.1".parse().unwrap()), Some(&3));
         assert_eq!(restored.longest_match("8.8.8.8".parse().unwrap()), Some(&0));
+    }
+
+    // ── len / is_empty ────────────────────────────────────────────────────────
+
+    #[test]
+    fn len_empty_table() {
+        let table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        assert_eq!(table.len(), 0);
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn len_tracks_inserts() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "a");
+        assert_eq!(table.len(), 1);
+        assert!(!table.is_empty());
+        table.insert("10.20.0.0/16".parse().unwrap(), "b");
+        assert_eq!(table.len(), 2);
+    }
+
+    #[test]
+    fn len_overwrite_does_not_increment() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "first");
+        table.insert("10.0.0.0/8".parse().unwrap(), "second");
+        assert_eq!(table.len(), 1);
+    }
+
+    #[test]
+    fn len_tracks_removes() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "a");
+        table.insert("10.20.0.0/16".parse().unwrap(), "b");
+        table.remove("10.0.0.0/8".parse().unwrap());
+        assert_eq!(table.len(), 1);
+        table.remove("10.20.0.0/16".parse().unwrap());
+        assert_eq!(table.len(), 0);
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn len_remove_nonexistent_does_not_decrement() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "a");
+        table.remove("192.168.0.0/16".parse().unwrap());
+        assert_eq!(table.len(), 1);
+    }
+
+    #[test]
+    fn len_matches_iter_count() {
+        let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+        let prefixes = ["0.0.0.0/0", "10.0.0.0/8", "10.20.0.0/16", "192.168.1.0/24"];
+        for (i, p) in prefixes.iter().enumerate() {
+            table.insert(p.parse().unwrap(), i as u32);
+        }
+        assert_eq!(table.len(), table.iter().count());
+    }
+
+    // ── IntoIterator ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn into_iter_for_loop_syntax() {
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        table.insert("10.20.0.0/16".parse().unwrap(), "twenty");
+
+        let mut count = 0;
+        for (_prefix, _value) in &table {
+            count += 1;
+        }
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn into_iter_collect() {
+        let mut table: IpTable<Ipv4Addr, u32> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), 1);
+        table.insert("192.168.0.0/16".parse().unwrap(), 2);
+
+        let entries: Vec<_> = (&table).into_iter().collect();
+        assert_eq!(entries.len(), 2);
     }
 }
