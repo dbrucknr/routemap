@@ -718,4 +718,47 @@ mod tests {
         assert_eq!(table.longest_match("31.255.255.255".parse().unwrap()), Some(&"slash3"));
         assert_eq!(table.longest_match("32.0.0.1".parse().unwrap()), None);
     }
+
+    // ── remove / contains with non-stride-aligned lengths ─────────────────────
+    // The rel_len > 0 branches in remove_at (line 303) and contains_at (line 350)
+    // are only reachable when prefix length % STRIDE != 0.  The early-return in
+    // remove_at when the destination bit is unset (line 310) requires navigating
+    // to the correct node and finding nothing there.
+
+    #[test]
+    fn remove_non_stride_aligned_prefix() {
+        // /10 = 2 full hops + rel_len 2 — exercises remove_at line 303
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "broad");
+        table.insert("10.64.0.0/10".parse().unwrap(), "slash10");
+
+        assert_eq!(table.remove("10.64.0.0/10".parse().unwrap()), Some("slash10"));
+        // broad prefix is unaffected
+        assert_eq!(table.longest_match("10.64.0.1".parse().unwrap()), Some(&"broad"));
+        assert!(!table.contains("10.64.0.0/10".parse().unwrap()));
+    }
+
+    #[test]
+    fn remove_non_stride_aligned_prefix_not_present() {
+        // Navigates to the correct destination node but the internal bit is unset —
+        // exercises remove_at line 310.
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "broad");
+
+        // /10 was never inserted; the node it would live in exists (created for
+        // /8), but the rel_len=2 internal bit for 10.64.0.0 is not set.
+        assert_eq!(table.remove("10.64.0.0/10".parse().unwrap()), None);
+        // table is unchanged
+        assert_eq!(table.longest_match("10.64.0.1".parse().unwrap()), Some(&"broad"));
+    }
+
+    #[test]
+    fn contains_non_stride_aligned_prefix() {
+        // Exercises contains_at line 350 (rel_len > 0 branch).
+        let mut table: IpTable<Ipv4Addr, &str> = IpTable::new();
+        table.insert("10.64.0.0/10".parse().unwrap(), "slash10");
+
+        assert!(table.contains("10.64.0.0/10".parse().unwrap()));
+        assert!(!table.contains("10.0.0.0/10".parse().unwrap())); // different /10 block
+    }
 }
