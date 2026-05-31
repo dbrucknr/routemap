@@ -226,3 +226,25 @@ structure — that would couple the wire format to the implementation.
 7.4 serde support
 7.5 Publish
 ```
+
+Should this project define traits that allow the functionality to be extended?
+Should this project also interoperate with netip?
+- or maybe netipx needs to support those data structures?
+
+Add:
+
+CI badges
+benchmarks
+fuzz testing
+MSRV policy
+changelog
+examples directory
+
+Is any if this tokio supportable?
+- It all looks like CPU intensive work to me, not I/O bound.
+
+Answer in README.md
+Why this crate exists?
+When to use it?
+
+Change name of directory from iplookup to routemap

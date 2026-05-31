@@ -225,6 +225,34 @@ impl<A: IpAddress, V> RouteMap<A, V> {
         value
     }
 
+    /// Returns a reference to the value for an exact prefix match, or `None`
+    /// if this prefix is not in the table.
+    ///
+    /// Unlike [`longest_match`](Self::longest_match), this never falls back to
+    /// a covering prefix — the prefix must be present exactly. Host bits in the
+    /// prefix address are ignored.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use routemap::RouteMap;
+    /// use std::net::Ipv4Addr;
+    ///
+    /// let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+    /// table.insert("10.0.0.0/8".parse().unwrap(), "broad");
+    /// table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+    ///
+    /// assert_eq!(table.get("10.0.0.0/8".parse().unwrap()), Some(&"broad"));
+    /// assert_eq!(table.get("10.20.0.0/16".parse().unwrap()), Some(&"specific"));
+    /// assert_eq!(table.get("10.99.0.0/16".parse().unwrap()), None);
+    /// ```
+    pub fn get(&self, prefix: IpPrefix<A>) -> Option<&V> {
+        let prefix = prefix.masked();
+        let addr = prefix.ip().to_u128();
+        let len = prefix.mask() as u32;
+        get_at(&self.root, addr, A::BITS as u32, 0, len / STRIDE, len % STRIDE)
+    }
+
     /// Returns `true` if the table contains an exact entry for this prefix.
     ///
     /// This is an exact match — not a longest-prefix match. Host bits are ignored.
@@ -421,6 +449,36 @@ fn insert_at<V>(
             rel_len,
             value,
         )
+    }
+}
+
+fn get_at<V>(
+    node: &TbNode<V>,
+    addr: u128,
+    addr_bits: u32,
+    current_hop: u32,
+    full_hops: u32,
+    rel_len: u32,
+) -> Option<&V> {
+    if current_hop == full_hops {
+        let nib = if rel_len > 0 {
+            nibble(addr, addr_bits, current_hop) >> (STRIDE - rel_len)
+        } else {
+            0
+        };
+        let bpos = (1u32 << rel_len) + nib;
+        if (node.internal >> bpos) & 1 == 1 {
+            Some(&node.values[rank(node.internal, bpos)])
+        } else {
+            None
+        }
+    } else {
+        let nib = nibble(addr, addr_bits, current_hop);
+        if (node.external >> nib) & 1 == 0 {
+            return None;
+        }
+        let child_idx = rank(node.external, nib);
+        get_at(&node.children[child_idx], addr, addr_bits, current_hop + 1, full_hops, rel_len)
     }
 }
 
@@ -870,6 +928,57 @@ mod tests {
         table.remove("10.20.0.0/16".parse().unwrap());
         assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), None);
         assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), None);
+    }
+
+    // ── get ───────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn get_returns_exact_entry() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "broad");
+        table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+
+        assert_eq!(table.get("10.0.0.0/8".parse().unwrap()), Some(&"broad"));
+        assert_eq!(table.get("10.20.0.0/16".parse().unwrap()), Some(&"specific"));
+    }
+
+    #[test]
+    fn get_returns_none_for_covering_prefix() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "broad");
+
+        // /16 was never inserted — get must not fall back to /8
+        assert_eq!(table.get("10.20.0.0/16".parse().unwrap()), None);
+    }
+
+    #[test]
+    fn get_returns_none_for_missing_prefix() {
+        let table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        assert_eq!(table.get("10.0.0.0/8".parse().unwrap()), None);
+    }
+
+    #[test]
+    fn get_with_unmasked_prefix_finds_entry() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        assert_eq!(table.get("10.99.99.99/8".parse().unwrap()), Some(&"ten"));
+    }
+
+    #[test]
+    fn get_returns_none_after_remove() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        table.remove("10.0.0.0/8".parse().unwrap());
+        assert_eq!(table.get("10.0.0.0/8".parse().unwrap()), None);
+    }
+
+    #[test]
+    fn get_non_stride_aligned_prefix() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.64.0.0/10".parse().unwrap(), "slash10");
+
+        assert_eq!(table.get("10.64.0.0/10".parse().unwrap()), Some(&"slash10"));
+        assert_eq!(table.get("10.0.0.0/10".parse().unwrap()), None);
     }
 
     // ── contains ──────────────────────────────────────────────────────────────

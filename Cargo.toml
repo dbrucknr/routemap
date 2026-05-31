@@ -7,7 +7,7 @@ description = "Fast in-memory IP prefix routing tables for IPv4 and IPv6. Longes
 license = "MIT"
 repository = "https://github.com/dbrucknr/routemap"
 readme = "README.md"
-keywords = ["ip", "network", "routing", "lpm", "cidr"]
+keywords = ["ip", "network", "routing", "lpm", "cidr", "treebitmap"]
 categories = ["network-programming", "data-structures"]
 
 [dependencies]
