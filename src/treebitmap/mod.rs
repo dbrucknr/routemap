@@ -1394,3 +1394,228 @@ mod tests {
         assert_eq!(entries.len(), 2);
     }
 }
+
+#[cfg(test)]
+mod prop_tests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    fn v4(addr: u32, len: u8) -> IpPrefix<Ipv4Addr> {
+        IpPrefix::new(Ipv4Addr::from(addr), len).unwrap()
+    }
+
+    fn v6(addr: u128, len: u8) -> IpPrefix<Ipv6Addr> {
+        IpPrefix::new(Ipv6Addr::from(addr), len).unwrap()
+    }
+
+    // Returns the network mask for a given IPv4 prefix length.
+    fn mask4(len: u8) -> u32 {
+        if len == 0 { 0 } else { !0u32 << (32 - len as u32) }
+    }
+
+    // Returns the network mask for a given IPv6 prefix length.
+    fn mask6(len: u8) -> u128 {
+        if len == 0 { 0 } else { !0u128 << (128 - len as u32) }
+    }
+
+    proptest! {
+        // ── Insert → contains / get roundtrip ────────────────────────────────
+
+        // Any inserted prefix must immediately be visible via contains() and get().
+        #[test]
+        fn insert_implies_contains_and_get(
+            addr in any::<u32>(), len in 0u8..=32u8, val in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(addr, len), val);
+            prop_assert!(t.contains(v4(addr, len)));
+            prop_assert_eq!(t.get(v4(addr, len)), Some(&val));
+        }
+
+        // longest_match on a prefix's own network address must return that prefix's value.
+        #[test]
+        fn insert_longest_match_hits_network_addr(
+            addr in any::<u32>(), len in 0u8..=32u8, val in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(addr, len), val);
+            let network = Ipv4Addr::from(addr & mask4(len));
+            prop_assert_eq!(t.longest_match(network), Some(&val));
+        }
+
+        // ── Overwrite semantics ───────────────────────────────────────────────
+
+        // Inserting the same prefix twice must leave len() == 1 and reflect the latest value.
+        #[test]
+        fn overwrite_preserves_len_and_updates_value(
+            addr in any::<u32>(), len in 0u8..=32u8,
+            v1 in any::<u32>(), v2 in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(addr, len), v1);
+            t.insert(v4(addr, len), v2);
+            prop_assert_eq!(t.len(), 1);
+            prop_assert_eq!(t.get(v4(addr, len)), Some(&v2));
+        }
+
+        // ── Masked equivalence ────────────────────────────────────────────────
+
+        // Inserting with host bits set must produce the same table as inserting the masked prefix.
+        #[test]
+        fn unmasked_insert_equals_masked_insert(
+            addr in any::<u32>(), len in 0u8..=32u8, val in any::<u32>(),
+        ) {
+            let mut t1: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            let mut t2: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t1.insert(v4(addr, len), val);
+            t2.insert(v4(addr & mask4(len), len), val);
+            prop_assert_eq!(t1.len(), t2.len());
+            for (prefix, &v) in t1.iter() {
+                prop_assert_eq!(t2.get(prefix), Some(&v));
+            }
+        }
+
+        // ── Remove consistency ────────────────────────────────────────────────
+
+        // After insert + remove, the prefix must be gone from every access path.
+        #[test]
+        fn remove_clears_entry(
+            addr in any::<u32>(), len in 0u8..=32u8, val in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(addr, len), val);
+            prop_assert_eq!(t.remove(v4(addr, len)), Some(val));
+            prop_assert!(!t.contains(v4(addr, len)));
+            prop_assert_eq!(t.get(v4(addr, len)), None);
+            prop_assert_eq!(t.len(), 0);
+        }
+
+        // ── len invariant ─────────────────────────────────────────────────────
+
+        // len() must always equal iter().count() after any sequence of inserts.
+        #[test]
+        fn len_equals_iter_count(
+            ops in prop::collection::vec((any::<u32>(), 0u8..=32u8, any::<u32>()), 1..=30),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            for (addr, len, val) in ops {
+                t.insert(v4(addr, len), val);
+            }
+            prop_assert_eq!(t.len(), t.iter().count());
+        }
+
+        // ── LPM correctness ───────────────────────────────────────────────────
+
+        // The most-specific matching prefix must win longest_match.
+        #[test]
+        fn more_specific_prefix_wins_lpm(
+            base in any::<u32>(),
+            broad_len in 0u8..=24u8,
+            extra in 1u8..=8u8,
+        ) {
+            let specific_len = broad_len + extra;
+            prop_assume!(specific_len <= 32);
+            let network = Ipv4Addr::from(base & mask4(specific_len));
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(base, broad_len), 1);
+            t.insert(v4(base, specific_len), 2);
+            prop_assert_eq!(t.longest_match(network), Some(&2));
+        }
+
+        // After removing the specific prefix, lookups must fall back to the covering prefix.
+        #[test]
+        fn remove_specific_falls_back_to_broad(
+            base in any::<u32>(),
+            broad_len in 0u8..=24u8,
+            extra in 1u8..=8u8,
+        ) {
+            let specific_len = broad_len + extra;
+            prop_assume!(specific_len <= 32);
+            let network = Ipv4Addr::from(base & mask4(specific_len));
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(base, broad_len), 1);
+            t.insert(v4(base, specific_len), 2);
+            t.remove(v4(base, specific_len));
+            prop_assert_eq!(t.longest_match(network), Some(&1));
+        }
+
+        // /0 is a universal default: it must match every possible address.
+        #[test]
+        fn default_route_matches_all_addresses(lookup in any::<u32>()) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(0, 0), 42);
+            prop_assert_eq!(t.longest_match(Ipv4Addr::from(lookup)), Some(&42));
+        }
+
+        // A /32 host route must match only its own address and nothing else.
+        #[test]
+        fn host_route_matches_only_exact_address(
+            host in any::<u32>(), other in any::<u32>(),
+        ) {
+            prop_assume!(host != other);
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(host, 32), 99);
+            prop_assert_eq!(t.longest_match(Ipv4Addr::from(host)), Some(&99));
+            prop_assert_eq!(t.longest_match(Ipv4Addr::from(other)), None);
+        }
+
+        // ── Iter completeness ─────────────────────────────────────────────────
+
+        // iter() + collect() must reconstruct a table with identical contents.
+        #[test]
+        fn iter_collect_roundtrip(
+            ops in prop::collection::vec((any::<u32>(), 0u8..=32u8, any::<u32>()), 1..=20),
+        ) {
+            let mut original: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            for (addr, len, val) in ops {
+                original.insert(v4(addr, len), val);
+            }
+            let restored: RouteMap<Ipv4Addr, u32> =
+                original.iter().map(|(p, &v)| (p, v)).collect();
+            prop_assert_eq!(original.len(), restored.len());
+            for (prefix, &val) in original.iter() {
+                prop_assert_eq!(restored.get(prefix), Some(&val));
+            }
+        }
+
+        // ── IPv6 parity ───────────────────────────────────────────────────────
+
+        // IPv6: any inserted prefix must be visible via contains() and get().
+        #[test]
+        fn ipv6_insert_implies_contains_and_get(
+            addr in any::<u128>(), len in 0u8..=128u8, val in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv6Addr, u32> = RouteMap::new();
+            t.insert(v6(addr, len), val);
+            prop_assert!(t.contains(v6(addr, len)));
+            prop_assert_eq!(t.get(v6(addr, len)), Some(&val));
+        }
+
+        // IPv6: /0 must match every possible 128-bit address.
+        #[test]
+        fn ipv6_default_route_matches_all(lookup in any::<u128>()) {
+            let mut t: RouteMap<Ipv6Addr, u32> = RouteMap::new();
+            t.insert(v6(0, 0), 55);
+            prop_assert_eq!(t.longest_match(Ipv6Addr::from(lookup)), Some(&55));
+        }
+
+        // IPv6: the more-specific prefix must win longest_match.
+        #[test]
+        fn ipv6_more_specific_prefix_wins_lpm(
+            base in any::<u128>(),
+            broad_len in 0u8..=120u8,
+            extra in 1u8..=8u8,
+        ) {
+            let specific_len = broad_len + extra;
+            prop_assume!(specific_len <= 128);
+            let network = Ipv6Addr::from(base & mask6(specific_len));
+            let mut t: RouteMap<Ipv6Addr, u32> = RouteMap::new();
+            t.insert(v6(base, broad_len), 1);
+            t.insert(v6(base, specific_len), 2);
+            prop_assert_eq!(t.longest_match(network), Some(&2));
+        }
+    }
+}
