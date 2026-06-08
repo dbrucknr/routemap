@@ -212,6 +212,97 @@ impl<A: IpAddress, V> RouteMap<A, V> {
         best
     }
 
+    /// Like [`longest_match`](Self::longest_match), but also returns the matching
+    /// prefix. Returns the `(prefix, &value)` pair for the most specific prefix
+    /// that matches `addr`, or `None` if no prefix in the table matches.
+    ///
+    /// The returned prefix is in canonical (masked) form, so it can be fed back
+    /// into [`get`](Self::get) or [`remove`](Self::remove) unchanged.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use routemap::RouteMap;
+    /// use std::net::Ipv4Addr;
+    ///
+    /// let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+    /// table.insert("0.0.0.0/0".parse().unwrap(), "default");
+    /// table.insert("10.0.0.0/8".parse().unwrap(), "datacenter");
+    /// table.insert("10.20.0.0/16".parse().unwrap(), "third-floor");
+    ///
+    /// assert_eq!(
+    ///     table.longest_match_entry("10.20.5.1".parse().unwrap()),
+    ///     Some(("10.20.0.0/16".parse().unwrap(), &"third-floor")),
+    /// );
+    /// assert_eq!(
+    ///     table.longest_match_entry("10.99.0.1".parse().unwrap()),
+    ///     Some(("10.0.0.0/8".parse().unwrap(), &"datacenter")),
+    /// );
+    /// assert_eq!(
+    ///     table.longest_match_entry("192.168.1.1".parse().unwrap()),
+    ///     Some(("0.0.0.0/0".parse().unwrap(), &"default")),
+    /// );
+    /// ```
+    // This mirrors `longest_match` rather than delegating to it: `longest_match`
+    // is the benchmarked hot path, and threading prefix tracking through it would
+    // burden every lookup. Here we additionally track the matched prefix length
+    // and build the `IpPrefix` exactly once, at return.
+    pub fn longest_match_entry(&self, addr: A) -> Option<(IpPrefix<A>, &V)> {
+        let addr = addr.to_u128();
+        let addr_bits = A::BITS as u32;
+        let total_strides = addr_bits / STRIDE;
+        let mut node = &self.root;
+        let mut best: Option<&V> = None;
+        let mut best_len: u32 = 0;
+        let mut last_advanced = false;
+
+        for hop in 0..total_strides {
+            let nib = nibble(addr, addr_bits, hop);
+
+            // Check all four relative lengths (0–3) inside this node's stride,
+            // from least to most specific so the last hit wins.
+            for rel_len in 0..STRIDE {
+                let rel_v = if rel_len == 0 {
+                    0u32
+                } else {
+                    nib >> (STRIDE - rel_len)
+                };
+                let bpos = (1u32 << rel_len) + rel_v;
+                if (node.internal >> bpos) & 1 == 1 {
+                    best = Some(&node.values[rank(node.internal, bpos)]);
+                    best_len = hop * STRIDE + rel_len;
+                }
+            }
+
+            // Descend to the external child for the full nibble, or stop.
+            if (node.external >> nib) & 1 == 0 {
+                last_advanced = false;
+                break;
+            }
+            node = &node.children[rank(node.external, nib)];
+            last_advanced = true;
+        }
+
+        // If we advanced on the very last stride, the depth-(total_strides) node was
+        // never visited by the loop body. Check its catch-all position (rel_len=0,
+        // bpos=1) — the only position reachable when all address bits are consumed.
+        // This handles /32 for IPv4 and /128 for IPv6.
+        if last_advanced && (node.internal >> 1) & 1 == 1 {
+            best = Some(&node.values[rank(node.internal, 1)]);
+            best_len = addr_bits;
+        }
+
+        best.map(|value| {
+            // The matched prefix shares its leading `best_len` bits with `addr`;
+            // `masked()` clears the host bits to yield the canonical network form
+            // (and sidesteps the `1 << addr_bits` shift hazard for a /0 default).
+            let prefix = IpPrefix::new(A::from_u128(addr), best_len as u8)
+                .expect("best_len never exceeds A::BITS")
+                .masked();
+            (prefix, value)
+        })
+    }
+
     /// Removes the entry for `prefix` and returns its value, or `None` if not found.
     ///
     /// Host bits in the prefix address are ignored.
@@ -1002,6 +1093,115 @@ mod tests {
             table.longest_match("::1".parse().unwrap()),
             Some(&"default")
         );
+    }
+
+    // ── longest_match_entry ───────────────────────────────────────────────────
+
+    #[test]
+    fn entry_empty_table_returns_none() {
+        let table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        assert_eq!(table.longest_match_entry("10.0.0.1".parse().unwrap()), None);
+    }
+
+    #[test]
+    fn entry_returns_most_specific_prefix() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "broad");
+        table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+        assert_eq!(
+            table.longest_match_entry("10.20.5.1".parse().unwrap()),
+            Some(("10.20.0.0/16".parse().unwrap(), &"specific")),
+        );
+        assert_eq!(
+            table.longest_match_entry("10.99.0.1".parse().unwrap()),
+            Some(("10.0.0.0/8".parse().unwrap(), &"broad")),
+        );
+    }
+
+    #[test]
+    fn entry_default_route_yields_slash0() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("0.0.0.0/0".parse().unwrap(), "default");
+        assert_eq!(
+            table.longest_match_entry("192.168.1.1".parse().unwrap()),
+            Some(("0.0.0.0/0".parse().unwrap(), &"default")),
+        );
+    }
+
+    #[test]
+    fn entry_slash32_host_yields_full_prefix() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "broad");
+        table.insert("10.0.0.1/32".parse().unwrap(), "host");
+        assert_eq!(
+            table.longest_match_entry("10.0.0.1".parse().unwrap()),
+            Some(("10.0.0.1/32".parse().unwrap(), &"host")),
+        );
+        assert_eq!(
+            table.longest_match_entry("10.0.0.2".parse().unwrap()),
+            Some(("10.0.0.0/8".parse().unwrap(), &"broad")),
+        );
+    }
+
+    #[test]
+    fn entry_miss_returns_none() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        assert_eq!(table.longest_match_entry("11.0.0.1".parse().unwrap()), None);
+    }
+
+    #[test]
+    fn entry_returned_prefix_is_canonical() {
+        // The returned prefix must round-trip through `get` unchanged, proving
+        // it is the masked network form rather than the raw lookup address.
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+        let (prefix, value) = table
+            .longest_match_entry("10.20.5.1".parse().unwrap())
+            .expect("address is covered");
+        assert_eq!(table.get(prefix), Some(value));
+    }
+
+    #[test]
+    fn entry_ipv6_most_specific_wins() {
+        let mut table: RouteMap<Ipv6Addr, &str> = RouteMap::new();
+        table.insert("2001:db8::/32".parse().unwrap(), "broad");
+        table.insert("2001:db8:1::/48".parse().unwrap(), "specific");
+        assert_eq!(
+            table.longest_match_entry("2001:db8:1::1".parse().unwrap()),
+            Some(("2001:db8:1::/48".parse().unwrap(), &"specific")),
+        );
+        assert_eq!(
+            table.longest_match_entry("2001:db8:2::1".parse().unwrap()),
+            Some(("2001:db8::/32".parse().unwrap(), &"broad")),
+        );
+    }
+
+    #[test]
+    fn entry_ipv6_slash128_host_yields_full_prefix() {
+        let mut table: RouteMap<Ipv6Addr, &str> = RouteMap::new();
+        table.insert("::/0".parse().unwrap(), "default");
+        table.insert("2001:db8::1/128".parse().unwrap(), "host");
+        assert_eq!(
+            table.longest_match_entry("2001:db8::1".parse().unwrap()),
+            Some(("2001:db8::1/128".parse().unwrap(), &"host")),
+        );
+    }
+
+    #[test]
+    fn entry_agrees_with_longest_match_value() {
+        // The companion must return the same value `longest_match` would.
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("0.0.0.0/0".parse().unwrap(), "default");
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+        for addr in ["10.20.5.1", "10.99.0.1", "192.168.1.1", "0.0.0.0"] {
+            let a: Ipv4Addr = addr.parse().unwrap();
+            assert_eq!(
+                table.longest_match_entry(a).map(|(_, v)| v),
+                table.longest_match(a),
+            );
+        }
     }
 
     // ── remove ────────────────────────────────────────────────────────────────
@@ -1834,6 +2034,88 @@ mod prop_tests {
             t.insert(v6(base, broad_len), 1);
             t.insert(v6(base, specific_len), 2);
             prop_assert_eq!(t.longest_match(network), Some(&2));
+        }
+
+        // ── longest_match_entry parity ────────────────────────────────────────
+
+        // longest_match_entry must return exactly the value longest_match returns,
+        // for any table and any lookup address.
+        #[test]
+        fn entry_value_agrees_with_longest_match(
+            ops in prop::collection::vec((any::<u32>(), 0u8..=32u8, any::<u32>()), 1..=30),
+            lookup in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            for (addr, len, val) in ops {
+                t.insert(v4(addr, len), val);
+            }
+            let a = Ipv4Addr::from(lookup);
+            prop_assert_eq!(t.longest_match_entry(a).map(|(_, v)| v), t.longest_match(a));
+        }
+
+        // The prefix returned by longest_match_entry must be canonical: feeding it
+        // back into get() must yield the very same value.
+        #[test]
+        fn entry_prefix_roundtrips_through_get(
+            ops in prop::collection::vec((any::<u32>(), 0u8..=32u8, any::<u32>()), 1..=30),
+            lookup in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            for (addr, len, val) in ops {
+                t.insert(v4(addr, len), val);
+            }
+            let a = Ipv4Addr::from(lookup);
+            if let Some((prefix, value)) = t.longest_match_entry(a) {
+                prop_assert_eq!(t.get(prefix), Some(value));
+            }
+        }
+
+        // Looking up a prefix's own network address must return that masked prefix.
+        #[test]
+        fn entry_hits_own_network_with_prefix(
+            addr in any::<u32>(), len in 0u8..=32u8, val in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(addr, len), val);
+            let network = Ipv4Addr::from(addr & mask4(len));
+            prop_assert_eq!(
+                t.longest_match_entry(network),
+                Some((v4(addr & mask4(len), len), &val)),
+            );
+        }
+
+        // When a more-specific prefix wins, the returned prefix must be the
+        // specific one, not the covering one.
+        #[test]
+        fn entry_returns_more_specific_prefix(
+            base in any::<u32>(),
+            broad_len in 0u8..=24u8,
+            extra in 1u8..=8u8,
+        ) {
+            let specific_len = broad_len + extra;
+            prop_assume!(specific_len <= 32);
+            let network = Ipv4Addr::from(base & mask4(specific_len));
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            t.insert(v4(base, broad_len), 1);
+            t.insert(v4(base, specific_len), 2);
+            prop_assert_eq!(
+                t.longest_match_entry(network),
+                Some((v4(base & mask4(specific_len), specific_len), &2)),
+            );
+        }
+
+        // IPv6: looking up a prefix's own network address returns that masked prefix.
+        #[test]
+        fn ipv6_entry_hits_own_network_with_prefix(
+            addr in any::<u128>(), len in 0u8..=128u8, val in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv6Addr, u32> = RouteMap::new();
+            t.insert(v6(addr, len), val);
+            let network = Ipv6Addr::from(addr & mask6(len));
+            prop_assert_eq!(
+                t.longest_match_entry(network),
+                Some((v6(addr & mask6(len), len), &val)),
+            );
         }
     }
 }
