@@ -67,8 +67,14 @@ fn rank(bitmap: u32, position: u32) -> usize {
 /// table.insert("10.0.0.0/8".parse().unwrap(), "datacenter");
 /// table.insert("10.20.0.0/16".parse().unwrap(), "third-floor");
 ///
-/// assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"third-floor"));
-/// assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"datacenter"));
+/// assert_eq!(
+///     table.longest_match("10.20.5.1".parse().unwrap()),
+///     Some(&"third-floor")
+/// );
+/// assert_eq!(
+///     table.longest_match("10.99.0.1".parse().unwrap()),
+///     Some(&"datacenter")
+/// );
 /// assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), None);
 /// ```
 pub struct RouteMap<A: IpAddress, V> {
@@ -111,7 +117,10 @@ impl<A: IpAddress, V> RouteMap<A, V> {
     /// let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
     /// table.insert("10.0.0.0/8".parse().unwrap(), "broad");
     /// table.insert("10.0.0.0/8".parse().unwrap(), "updated");
-    /// assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"updated"));
+    /// assert_eq!(
+    ///     table.longest_match("10.0.0.1".parse().unwrap()),
+    ///     Some(&"updated")
+    /// );
     /// ```
     pub fn insert(&mut self, prefix: IpPrefix<A>, value: V) {
         let prefix = prefix.masked();
@@ -145,9 +154,18 @@ impl<A: IpAddress, V> RouteMap<A, V> {
     /// table.insert("10.0.0.0/8".parse().unwrap(), "datacenter");
     /// table.insert("10.20.0.0/16".parse().unwrap(), "third-floor");
     ///
-    /// assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"third-floor"));
-    /// assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"datacenter"));
-    /// assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), Some(&"default"));
+    /// assert_eq!(
+    ///     table.longest_match("10.20.5.1".parse().unwrap()),
+    ///     Some(&"third-floor")
+    /// );
+    /// assert_eq!(
+    ///     table.longest_match("10.99.0.1".parse().unwrap()),
+    ///     Some(&"datacenter")
+    /// );
+    /// assert_eq!(
+    ///     table.longest_match("192.168.1.1".parse().unwrap()),
+    ///     Some(&"default")
+    /// );
     /// ```
     pub fn longest_match(&self, addr: A) -> Option<&V> {
         let addr = addr.to_u128();
@@ -163,7 +181,11 @@ impl<A: IpAddress, V> RouteMap<A, V> {
             // Check all four relative lengths (0–3) inside this node's stride,
             // from least to most specific so the last hit wins.
             for rel_len in 0..STRIDE {
-                let rel_v = if rel_len == 0 { 0u32 } else { nib >> (STRIDE - rel_len) };
+                let rel_v = if rel_len == 0 {
+                    0u32
+                } else {
+                    nib >> (STRIDE - rel_len)
+                };
                 let bpos = (1u32 << rel_len) + rel_v;
                 if (node.internal >> bpos) & 1 == 1 {
                     best = Some(&node.values[rank(node.internal, bpos)]);
@@ -204,8 +226,14 @@ impl<A: IpAddress, V> RouteMap<A, V> {
     /// table.insert("10.0.0.0/8".parse().unwrap(), "broad");
     /// table.insert("10.20.0.0/16".parse().unwrap(), "specific");
     ///
-    /// assert_eq!(table.remove("10.20.0.0/16".parse().unwrap()), Some("specific"));
-    /// assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"broad"));
+    /// assert_eq!(
+    ///     table.remove("10.20.0.0/16".parse().unwrap()),
+    ///     Some("specific")
+    /// );
+    /// assert_eq!(
+    ///     table.longest_match("10.20.5.1".parse().unwrap()),
+    ///     Some(&"broad")
+    /// );
     /// ```
     pub fn remove(&mut self, prefix: IpPrefix<A>) -> Option<V> {
         let prefix = prefix.masked();
@@ -243,14 +271,24 @@ impl<A: IpAddress, V> RouteMap<A, V> {
     /// table.insert("10.20.0.0/16".parse().unwrap(), "specific");
     ///
     /// assert_eq!(table.get("10.0.0.0/8".parse().unwrap()), Some(&"broad"));
-    /// assert_eq!(table.get("10.20.0.0/16".parse().unwrap()), Some(&"specific"));
+    /// assert_eq!(
+    ///     table.get("10.20.0.0/16".parse().unwrap()),
+    ///     Some(&"specific")
+    /// );
     /// assert_eq!(table.get("10.99.0.0/16".parse().unwrap()), None);
     /// ```
     pub fn get(&self, prefix: IpPrefix<A>) -> Option<&V> {
         let prefix = prefix.masked();
         let addr = prefix.ip().to_u128();
         let len = prefix.mask() as u32;
-        get_at(&self.root, addr, A::BITS as u32, 0, len / STRIDE, len % STRIDE)
+        get_at(
+            &self.root,
+            addr,
+            A::BITS as u32,
+            0,
+            len / STRIDE,
+            len % STRIDE,
+        )
     }
 
     /// Returns `true` if the table contains an exact entry for this prefix.
@@ -281,7 +319,7 @@ impl<A: IpAddress, V> RouteMap<A, V> {
     /// use std::net::Ipv4Addr;
     ///
     /// let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
-    /// table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+    /// table.insert("10.0.0.0/8".parse().unwrap(), "broad");
     /// table.insert("10.20.0.0/16".parse().unwrap(), "specific");
     ///
     /// let mut entries: Vec<_> = table.iter().collect();
@@ -478,7 +516,14 @@ fn get_at<V>(
             return None;
         }
         let child_idx = rank(node.external, nib);
-        get_at(&node.children[child_idx], addr, addr_bits, current_hop + 1, full_hops, rel_len)
+        get_at(
+            &node.children[child_idx],
+            addr,
+            addr_bits,
+            current_hop + 1,
+            full_hops,
+            rel_len,
+        )
     }
 }
 
@@ -516,8 +561,14 @@ fn remove_at<V>(
         }
 
         let child_idx = rank(node.external, nib);
-        let (value, prune) =
-            remove_at(&mut node.children[child_idx], addr, addr_bits, current_hop + 1, full_hops, rel_len);
+        let (value, prune) = remove_at(
+            &mut node.children[child_idx],
+            addr,
+            addr_bits,
+            current_hop + 1,
+            full_hops,
+            rel_len,
+        );
 
         if prune {
             node.children.remove(child_idx);
@@ -619,16 +670,14 @@ impl<'a, A: IpAddress, V> Iterator for Iter<'a, A, V> {
                     let rel_bits = bpos - (1u32 << rel_len);
                     let full_len = hop * STRIDE + rel_len;
                     let full_addr = if rel_len > 0 {
-                        addr | ((rel_bits as u128)
-                            << (self.addr_bits - hop * STRIDE - rel_len))
+                        addr | ((rel_bits as u128) << (self.addr_bits - hop * STRIDE - rel_len))
                     } else {
                         addr
                     };
 
                     let idx = rank(node.internal, bpos);
                     let value: &'a V = &node.values[idx];
-                    let prefix =
-                        IpPrefix::new(A::from_u128(full_addr), full_len as u8).unwrap();
+                    let prefix = IpPrefix::new(A::from_u128(full_addr), full_len as u8).unwrap();
                     return Some((prefix, value));
                 }
                 self.stack[depth - 1].internal_cursor = 16;
@@ -723,9 +772,18 @@ mod tests {
     fn default_route_matches_any_address() {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("0.0.0.0/0".parse().unwrap(), "default");
-        assert_eq!(table.longest_match("1.2.3.4".parse().unwrap()), Some(&"default"));
-        assert_eq!(table.longest_match("255.255.255.255".parse().unwrap()), Some(&"default"));
-        assert_eq!(table.longest_match("0.0.0.0".parse().unwrap()), Some(&"default"));
+        assert_eq!(
+            table.longest_match("1.2.3.4".parse().unwrap()),
+            Some(&"default")
+        );
+        assert_eq!(
+            table.longest_match("255.255.255.255".parse().unwrap()),
+            Some(&"default")
+        );
+        assert_eq!(
+            table.longest_match("0.0.0.0".parse().unwrap()),
+            Some(&"default")
+        );
     }
 
     #[test]
@@ -733,8 +791,14 @@ mod tests {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("0.0.0.0/0".parse().unwrap(), "default");
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"ten"));
-        assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), Some(&"default"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"ten")
+        );
+        assert_eq!(
+            table.longest_match("192.168.1.1".parse().unwrap()),
+            Some(&"default")
+        );
     }
 
     // ── Single prefix ─────────────────────────────────────────────────────────
@@ -743,7 +807,10 @@ mod tests {
     fn single_prefix_hit() {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"ten"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"ten")
+        );
     }
 
     #[test]
@@ -757,7 +824,10 @@ mod tests {
     fn network_address_itself_matches() {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
-        assert_eq!(table.longest_match("10.0.0.0".parse().unwrap()), Some(&"ten"));
+        assert_eq!(
+            table.longest_match("10.0.0.0".parse().unwrap()),
+            Some(&"ten")
+        );
     }
 
     #[test]
@@ -771,7 +841,10 @@ mod tests {
     fn last_address_in_prefix_matches() {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("10.0.0.0/24".parse().unwrap(), "subnet");
-        assert_eq!(table.longest_match("10.0.0.255".parse().unwrap()), Some(&"subnet"));
+        assert_eq!(
+            table.longest_match("10.0.0.255".parse().unwrap()),
+            Some(&"subnet")
+        );
     }
 
     // ── Most specific wins ────────────────────────────────────────────────────
@@ -781,8 +854,14 @@ mod tests {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.20.0.0/16".parse().unwrap(), "specific");
-        assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"specific"));
-        assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.20.5.1".parse().unwrap()),
+            Some(&"specific")
+        );
+        assert_eq!(
+            table.longest_match("10.99.0.1".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     #[test]
@@ -791,9 +870,18 @@ mod tests {
         table.insert("10.0.0.0/8".parse().unwrap(), "level-1");
         table.insert("10.20.0.0/16".parse().unwrap(), "level-2");
         table.insert("10.20.30.0/24".parse().unwrap(), "level-3");
-        assert_eq!(table.longest_match("10.20.30.1".parse().unwrap()), Some(&"level-3"));
-        assert_eq!(table.longest_match("10.20.99.1".parse().unwrap()), Some(&"level-2"));
-        assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"level-1"));
+        assert_eq!(
+            table.longest_match("10.20.30.1".parse().unwrap()),
+            Some(&"level-3")
+        );
+        assert_eq!(
+            table.longest_match("10.20.99.1".parse().unwrap()),
+            Some(&"level-2")
+        );
+        assert_eq!(
+            table.longest_match("10.99.0.1".parse().unwrap()),
+            Some(&"level-1")
+        );
         assert_eq!(table.longest_match("9.0.0.1".parse().unwrap()), None);
     }
 
@@ -804,8 +892,14 @@ mod tests {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.0.0.1/32".parse().unwrap(), "host");
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"host"));
-        assert_eq!(table.longest_match("10.0.0.2".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"host")
+        );
+        assert_eq!(
+            table.longest_match("10.0.0.2".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     // ── Overwrite ─────────────────────────────────────────────────────────────
@@ -815,7 +909,10 @@ mod tests {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "first");
         table.insert("10.0.0.0/8".parse().unwrap(), "second");
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"second"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"second")
+        );
     }
 
     // ── Non-overlapping prefixes ──────────────────────────────────────────────
@@ -825,8 +922,14 @@ mod tests {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
         table.insert("192.168.0.0/16".parse().unwrap(), "office");
-        assert_eq!(table.longest_match("10.1.2.3".parse().unwrap()), Some(&"ten"));
-        assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), Some(&"office"));
+        assert_eq!(
+            table.longest_match("10.1.2.3".parse().unwrap()),
+            Some(&"ten")
+        );
+        assert_eq!(
+            table.longest_match("192.168.1.1".parse().unwrap()),
+            Some(&"office")
+        );
         assert_eq!(table.longest_match("172.16.0.1".parse().unwrap()), None);
     }
 
@@ -836,7 +939,10 @@ mod tests {
     fn ipv6_basic_match() {
         let mut table: RouteMap<Ipv6Addr, &str> = RouteMap::new();
         table.insert("2001:db8::/32".parse().unwrap(), "docs");
-        assert_eq!(table.longest_match("2001:db8::1".parse().unwrap()), Some(&"docs"));
+        assert_eq!(
+            table.longest_match("2001:db8::1".parse().unwrap()),
+            Some(&"docs")
+        );
         assert_eq!(table.longest_match("2001:db9::1".parse().unwrap()), None);
     }
 
@@ -845,16 +951,28 @@ mod tests {
         let mut table: RouteMap<Ipv6Addr, &str> = RouteMap::new();
         table.insert("2001:db8::/32".parse().unwrap(), "broad");
         table.insert("2001:db8:1::/48".parse().unwrap(), "specific");
-        assert_eq!(table.longest_match("2001:db8:1::1".parse().unwrap()), Some(&"specific"));
-        assert_eq!(table.longest_match("2001:db8:2::1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("2001:db8:1::1".parse().unwrap()),
+            Some(&"specific")
+        );
+        assert_eq!(
+            table.longest_match("2001:db8:2::1".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     #[test]
     fn ipv6_default_route() {
         let mut table: RouteMap<Ipv6Addr, &str> = RouteMap::new();
         table.insert("::/0".parse().unwrap(), "default");
-        assert_eq!(table.longest_match("2001:db8::1".parse().unwrap()), Some(&"default"));
-        assert_eq!(table.longest_match("::1".parse().unwrap()), Some(&"default"));
+        assert_eq!(
+            table.longest_match("2001:db8::1".parse().unwrap()),
+            Some(&"default")
+        );
+        assert_eq!(
+            table.longest_match("::1".parse().unwrap()),
+            Some(&"default")
+        );
     }
 
     // ── remove ────────────────────────────────────────────────────────────────
@@ -879,7 +997,10 @@ mod tests {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
         assert_eq!(table.remove("192.168.0.0/16".parse().unwrap()), None);
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"ten"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"ten")
+        );
     }
 
     #[test]
@@ -888,8 +1009,14 @@ mod tests {
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.20.0.0/16".parse().unwrap(), "specific");
         table.remove("10.20.0.0/16".parse().unwrap());
-        assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"broad"));
-        assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.20.5.1".parse().unwrap()),
+            Some(&"broad")
+        );
+        assert_eq!(
+            table.longest_match("10.99.0.1".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     #[test]
@@ -898,7 +1025,10 @@ mod tests {
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.20.0.0/16".parse().unwrap(), "specific");
         table.remove("10.0.0.0/8".parse().unwrap());
-        assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"specific"));
+        assert_eq!(
+            table.longest_match("10.20.5.1".parse().unwrap()),
+            Some(&"specific")
+        );
         assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), None);
     }
 
@@ -915,7 +1045,10 @@ mod tests {
         table.insert("0.0.0.0/0".parse().unwrap(), "default");
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
         table.remove("0.0.0.0/0".parse().unwrap());
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"ten"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"ten")
+        );
         assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), None);
     }
 
@@ -939,7 +1072,10 @@ mod tests {
         table.insert("10.20.0.0/16".parse().unwrap(), "specific");
 
         assert_eq!(table.get("10.0.0.0/8".parse().unwrap()), Some(&"broad"));
-        assert_eq!(table.get("10.20.0.0/16".parse().unwrap()), Some(&"specific"));
+        assert_eq!(
+            table.get("10.20.0.0/16".parse().unwrap()),
+            Some(&"specific")
+        );
     }
 
     #[test]
@@ -1041,8 +1177,14 @@ mod tests {
         // /10 = 2 full strides + rel_len 2
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.64.0.0/10".parse().unwrap(), "slash10");
-        assert_eq!(table.longest_match("10.64.0.1".parse().unwrap()), Some(&"slash10"));
-        assert_eq!(table.longest_match("10.128.0.1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.64.0.1".parse().unwrap()),
+            Some(&"slash10")
+        );
+        assert_eq!(
+            table.longest_match("10.128.0.1".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     #[test]
@@ -1050,7 +1192,10 @@ mod tests {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         // /1 covers 0.0.0.0–127.255.255.255
         table.insert("0.0.0.0/1".parse().unwrap(), "low-half");
-        assert_eq!(table.longest_match("1.2.3.4".parse().unwrap()), Some(&"low-half"));
+        assert_eq!(
+            table.longest_match("1.2.3.4".parse().unwrap()),
+            Some(&"low-half")
+        );
         assert_eq!(table.longest_match("128.0.0.1".parse().unwrap()), None);
     }
 
@@ -1058,7 +1203,10 @@ mod tests {
     fn prefix_length_two() {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("128.0.0.0/2".parse().unwrap(), "class-b");
-        assert_eq!(table.longest_match("191.255.255.255".parse().unwrap()), Some(&"class-b"));
+        assert_eq!(
+            table.longest_match("191.255.255.255".parse().unwrap()),
+            Some(&"class-b")
+        );
         assert_eq!(table.longest_match("64.0.0.1".parse().unwrap()), None);
     }
 
@@ -1067,8 +1215,14 @@ mod tests {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         table.insert("10.0.0.0/3".parse().unwrap(), "slash3");
         // 10.0.0.0/3: binary 00001010 → top 3 bits are 000 → covers 0.0.0.0–31.255.255.255
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"slash3"));
-        assert_eq!(table.longest_match("31.255.255.255".parse().unwrap()), Some(&"slash3"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"slash3")
+        );
+        assert_eq!(
+            table.longest_match("31.255.255.255".parse().unwrap()),
+            Some(&"slash3")
+        );
         assert_eq!(table.longest_match("32.0.0.1".parse().unwrap()), None);
     }
 
@@ -1085,9 +1239,15 @@ mod tests {
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.64.0.0/10".parse().unwrap(), "slash10");
 
-        assert_eq!(table.remove("10.64.0.0/10".parse().unwrap()), Some("slash10"));
+        assert_eq!(
+            table.remove("10.64.0.0/10".parse().unwrap()),
+            Some("slash10")
+        );
         // broad prefix is unaffected
-        assert_eq!(table.longest_match("10.64.0.1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.64.0.1".parse().unwrap()),
+            Some(&"broad")
+        );
         assert!(!table.contains("10.64.0.0/10".parse().unwrap()));
     }
 
@@ -1102,7 +1262,10 @@ mod tests {
         // /8), but the rel_len=2 internal bit for 10.64.0.0 is not set.
         assert_eq!(table.remove("10.64.0.0/10".parse().unwrap()), None);
         // table is unchanged
-        assert_eq!(table.longest_match("10.64.0.1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.64.0.1".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     #[test]
@@ -1117,9 +1280,7 @@ mod tests {
 
     // ── iter ──────────────────────────────────────────────────────────────────
 
-    fn sorted_entries<A: IpAddress, V: Clone>(
-        table: &RouteMap<A, V>,
-    ) -> Vec<(String, V)> {
+    fn sorted_entries<A: IpAddress, V: Clone>(table: &RouteMap<A, V>) -> Vec<(String, V)> {
         let mut entries: Vec<_> = table
             .iter()
             .map(|(p, v)| (format!("{}/{}", p.ip(), p.mask()), v.clone()))
@@ -1154,8 +1315,8 @@ mod tests {
     #[test]
     fn iter_multiple_prefixes_all_present() {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
-        table.insert("0.0.0.0/0".parse().unwrap(),    "default");
-        table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+        table.insert("0.0.0.0/0".parse().unwrap(), "default");
+        table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.20.0.0/16".parse().unwrap(), "specific");
         table.insert("10.20.30.0/24".parse().unwrap(), "narrow");
 
@@ -1194,8 +1355,14 @@ mod tests {
         // Round-trip: insert N distinct prefixes, iter must yield exactly N.
         let mut table: RouteMap<Ipv4Addr, u32> = RouteMap::new();
         let prefixes = [
-            "0.0.0.0/0", "10.0.0.0/8", "10.0.0.0/16", "10.0.0.0/24",
-            "172.16.0.0/12", "192.168.0.0/16", "192.168.1.0/24", "10.0.0.1/32",
+            "0.0.0.0/0",
+            "10.0.0.0/8",
+            "10.0.0.0/16",
+            "10.0.0.0/24",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "192.168.1.0/24",
+            "10.0.0.1/32",
         ];
         for (i, p) in prefixes.iter().enumerate() {
             table.insert(p.parse().unwrap(), i as u32);
@@ -1206,7 +1373,7 @@ mod tests {
     #[test]
     fn iter_ipv6() {
         let mut table: RouteMap<Ipv6Addr, &str> = RouteMap::new();
-        table.insert("::/0".parse().unwrap(),          "default");
+        table.insert("::/0".parse().unwrap(), "default");
         table.insert("2001:db8::/32".parse().unwrap(), "docs");
         table.insert("2001:db8:1::/48".parse().unwrap(), "subnet");
 
@@ -1224,8 +1391,8 @@ mod tests {
         // through all three subtrees the cursor scans past the last set bit.
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
         // nibble[0] of each: 0x0A=10→nib 0, 0x40=64→nib 4, 0xC0=192→nib 12
-        table.insert("10.0.0.0/8".parse().unwrap(),    "ten");
-        table.insert("64.0.0.0/8".parse().unwrap(),    "sixty-four");
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        table.insert("64.0.0.0/8".parse().unwrap(), "sixty-four");
         table.insert("192.168.0.0/16".parse().unwrap(), "office");
 
         assert_eq!(table.iter().count(), 3);
@@ -1234,7 +1401,7 @@ mod tests {
     #[test]
     fn iter_after_remove_reflects_change() {
         let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
-        table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+        table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.20.0.0/16".parse().unwrap(), "specific");
 
         table.remove("10.0.0.0/8".parse().unwrap());
@@ -1285,30 +1452,44 @@ mod tests {
     fn collect_from_iterator() {
         use ipnetx::prefix::IpPrefix;
         let pairs: Vec<(IpPrefix<Ipv4Addr>, &str)> = vec![
-            ("10.0.0.0/8".parse().unwrap(),   "broad"),
+            ("10.0.0.0/8".parse().unwrap(), "broad"),
             ("10.20.0.0/16".parse().unwrap(), "specific"),
         ];
         let table: RouteMap<Ipv4Addr, &str> = pairs.into_iter().collect();
-        assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"specific"));
-        assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.20.5.1".parse().unwrap()),
+            Some(&"specific")
+        );
+        assert_eq!(
+            table.longest_match("10.99.0.1".parse().unwrap()),
+            Some(&"broad")
+        );
         assert_eq!(table.iter().count(), 2);
     }
 
     #[test]
     fn iter_collect_round_trip() {
         let mut original: RouteMap<Ipv4Addr, u32> = RouteMap::new();
-        original.insert("0.0.0.0/0".parse().unwrap(),    0);
-        original.insert("10.0.0.0/8".parse().unwrap(),   1);
+        original.insert("0.0.0.0/0".parse().unwrap(), 0);
+        original.insert("10.0.0.0/8".parse().unwrap(), 1);
         original.insert("10.20.0.0/16".parse().unwrap(), 2);
         original.insert("192.168.0.0/16".parse().unwrap(), 3);
 
-        let restored: RouteMap<Ipv4Addr, u32> =
-            original.iter().map(|(p, &v)| (p, v)).collect();
+        let restored: RouteMap<Ipv4Addr, u32> = original.iter().map(|(p, &v)| (p, v)).collect();
 
         assert_eq!(restored.iter().count(), 4);
-        assert_eq!(restored.longest_match("10.20.5.1".parse().unwrap()), Some(&2));
-        assert_eq!(restored.longest_match("10.99.0.1".parse().unwrap()), Some(&1));
-        assert_eq!(restored.longest_match("192.168.1.1".parse().unwrap()), Some(&3));
+        assert_eq!(
+            restored.longest_match("10.20.5.1".parse().unwrap()),
+            Some(&2)
+        );
+        assert_eq!(
+            restored.longest_match("10.99.0.1".parse().unwrap()),
+            Some(&1)
+        );
+        assert_eq!(
+            restored.longest_match("192.168.1.1".parse().unwrap()),
+            Some(&3)
+        );
         assert_eq!(restored.longest_match("8.8.8.8".parse().unwrap()), Some(&0));
     }
 
@@ -1413,12 +1594,20 @@ mod prop_tests {
 
     // Returns the network mask for a given IPv4 prefix length.
     fn mask4(len: u8) -> u32 {
-        if len == 0 { 0 } else { !0u32 << (32 - len as u32) }
+        if len == 0 {
+            0
+        } else {
+            !0u32 << (32 - len as u32)
+        }
     }
 
     // Returns the network mask for a given IPv6 prefix length.
     fn mask6(len: u8) -> u128 {
-        if len == 0 { 0 } else { !0u128 << (128 - len as u32) }
+        if len == 0 {
+            0
+        } else {
+            !0u128 << (128 - len as u32)
+        }
     }
 
     proptest! {

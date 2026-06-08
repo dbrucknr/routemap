@@ -98,8 +98,8 @@ impl<A: IpAddress, V> ArenaTable<A, V> {
     ) -> (Option<V>, bool) {
         if depth == target_depth {
             let value = nodes[cur as usize].value.take();
-            let empty = nodes[cur as usize].children[0] == NULL
-                && nodes[cur as usize].children[1] == NULL;
+            let empty =
+                nodes[cur as usize].children[0] == NULL && nodes[cur as usize].children[1] == NULL;
             return (value, empty);
         }
 
@@ -140,9 +140,18 @@ mod tests {
     fn default_route_matches_any_address() {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("0.0.0.0/0".parse().unwrap(), "default");
-        assert_eq!(table.longest_match("1.2.3.4".parse().unwrap()), Some(&"default"));
-        assert_eq!(table.longest_match("255.255.255.255".parse().unwrap()), Some(&"default"));
-        assert_eq!(table.longest_match("0.0.0.0".parse().unwrap()), Some(&"default"));
+        assert_eq!(
+            table.longest_match("1.2.3.4".parse().unwrap()),
+            Some(&"default")
+        );
+        assert_eq!(
+            table.longest_match("255.255.255.255".parse().unwrap()),
+            Some(&"default")
+        );
+        assert_eq!(
+            table.longest_match("0.0.0.0".parse().unwrap()),
+            Some(&"default")
+        );
     }
 
     #[test]
@@ -150,15 +159,24 @@ mod tests {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("0.0.0.0/0".parse().unwrap(), "default");
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"ten"));
-        assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), Some(&"default"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"ten")
+        );
+        assert_eq!(
+            table.longest_match("192.168.1.1".parse().unwrap()),
+            Some(&"default")
+        );
     }
 
     #[test]
     fn single_prefix_hit() {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"ten"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"ten")
+        );
     }
 
     #[test]
@@ -172,7 +190,10 @@ mod tests {
     fn network_address_itself_matches() {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
-        assert_eq!(table.longest_match("10.0.0.0".parse().unwrap()), Some(&"ten"));
+        assert_eq!(
+            table.longest_match("10.0.0.0".parse().unwrap()),
+            Some(&"ten")
+        );
     }
 
     #[test]
@@ -186,7 +207,10 @@ mod tests {
     fn last_address_in_prefix_matches() {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("10.0.0.0/24".parse().unwrap(), "subnet");
-        assert_eq!(table.longest_match("10.0.0.255".parse().unwrap()), Some(&"subnet"));
+        assert_eq!(
+            table.longest_match("10.0.0.255".parse().unwrap()),
+            Some(&"subnet")
+        );
     }
 
     #[test]
@@ -194,8 +218,14 @@ mod tests {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.20.0.0/16".parse().unwrap(), "specific");
-        assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"specific"));
-        assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.20.5.1".parse().unwrap()),
+            Some(&"specific")
+        );
+        assert_eq!(
+            table.longest_match("10.99.0.1".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     #[test]
@@ -204,9 +234,18 @@ mod tests {
         table.insert("10.0.0.0/8".parse().unwrap(), "level-1");
         table.insert("10.20.0.0/16".parse().unwrap(), "level-2");
         table.insert("10.20.30.0/24".parse().unwrap(), "level-3");
-        assert_eq!(table.longest_match("10.20.30.1".parse().unwrap()), Some(&"level-3"));
-        assert_eq!(table.longest_match("10.20.99.1".parse().unwrap()), Some(&"level-2"));
-        assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"level-1"));
+        assert_eq!(
+            table.longest_match("10.20.30.1".parse().unwrap()),
+            Some(&"level-3")
+        );
+        assert_eq!(
+            table.longest_match("10.20.99.1".parse().unwrap()),
+            Some(&"level-2")
+        );
+        assert_eq!(
+            table.longest_match("10.99.0.1".parse().unwrap()),
+            Some(&"level-1")
+        );
         assert_eq!(table.longest_match("9.0.0.1".parse().unwrap()), None);
     }
 
@@ -215,8 +254,14 @@ mod tests {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.0.0.1/32".parse().unwrap(), "host");
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"host"));
-        assert_eq!(table.longest_match("10.0.0.2".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"host")
+        );
+        assert_eq!(
+            table.longest_match("10.0.0.2".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     #[test]
@@ -224,7 +269,10 @@ mod tests {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "first");
         table.insert("10.0.0.0/8".parse().unwrap(), "second");
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"second"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"second")
+        );
     }
 
     #[test]
@@ -232,8 +280,14 @@ mod tests {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
         table.insert("192.168.0.0/16".parse().unwrap(), "office");
-        assert_eq!(table.longest_match("10.1.2.3".parse().unwrap()), Some(&"ten"));
-        assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), Some(&"office"));
+        assert_eq!(
+            table.longest_match("10.1.2.3".parse().unwrap()),
+            Some(&"ten")
+        );
+        assert_eq!(
+            table.longest_match("192.168.1.1".parse().unwrap()),
+            Some(&"office")
+        );
         assert_eq!(table.longest_match("172.16.0.1".parse().unwrap()), None);
     }
 
@@ -241,7 +295,10 @@ mod tests {
     fn ipv6_basic_match() {
         let mut table: ArenaTable<Ipv6Addr, &str> = ArenaTable::new();
         table.insert("2001:db8::/32".parse().unwrap(), "docs");
-        assert_eq!(table.longest_match("2001:db8::1".parse().unwrap()), Some(&"docs"));
+        assert_eq!(
+            table.longest_match("2001:db8::1".parse().unwrap()),
+            Some(&"docs")
+        );
         assert_eq!(table.longest_match("2001:db9::1".parse().unwrap()), None);
     }
 
@@ -250,16 +307,28 @@ mod tests {
         let mut table: ArenaTable<Ipv6Addr, &str> = ArenaTable::new();
         table.insert("2001:db8::/32".parse().unwrap(), "broad");
         table.insert("2001:db8:1::/48".parse().unwrap(), "specific");
-        assert_eq!(table.longest_match("2001:db8:1::1".parse().unwrap()), Some(&"specific"));
-        assert_eq!(table.longest_match("2001:db8:2::1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("2001:db8:1::1".parse().unwrap()),
+            Some(&"specific")
+        );
+        assert_eq!(
+            table.longest_match("2001:db8:2::1".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     #[test]
     fn ipv6_default_route() {
         let mut table: ArenaTable<Ipv6Addr, &str> = ArenaTable::new();
         table.insert("::/0".parse().unwrap(), "default");
-        assert_eq!(table.longest_match("2001:db8::1".parse().unwrap()), Some(&"default"));
-        assert_eq!(table.longest_match("::1".parse().unwrap()), Some(&"default"));
+        assert_eq!(
+            table.longest_match("2001:db8::1".parse().unwrap()),
+            Some(&"default")
+        );
+        assert_eq!(
+            table.longest_match("::1".parse().unwrap()),
+            Some(&"default")
+        );
     }
 
     #[test]
@@ -282,7 +351,10 @@ mod tests {
         let mut table: ArenaTable<Ipv4Addr, &str> = ArenaTable::new();
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
         assert_eq!(table.remove("192.168.0.0/16".parse().unwrap()), None);
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"ten"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"ten")
+        );
     }
 
     #[test]
@@ -291,8 +363,14 @@ mod tests {
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.20.0.0/16".parse().unwrap(), "specific");
         table.remove("10.20.0.0/16".parse().unwrap());
-        assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"broad"));
-        assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"broad"));
+        assert_eq!(
+            table.longest_match("10.20.5.1".parse().unwrap()),
+            Some(&"broad")
+        );
+        assert_eq!(
+            table.longest_match("10.99.0.1".parse().unwrap()),
+            Some(&"broad")
+        );
     }
 
     #[test]
@@ -301,7 +379,10 @@ mod tests {
         table.insert("10.0.0.0/8".parse().unwrap(), "broad");
         table.insert("10.20.0.0/16".parse().unwrap(), "specific");
         table.remove("10.0.0.0/8".parse().unwrap());
-        assert_eq!(table.longest_match("10.20.5.1".parse().unwrap()), Some(&"specific"));
+        assert_eq!(
+            table.longest_match("10.20.5.1".parse().unwrap()),
+            Some(&"specific")
+        );
         assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), None);
     }
 
@@ -318,7 +399,10 @@ mod tests {
         table.insert("0.0.0.0/0".parse().unwrap(), "default");
         table.insert("10.0.0.0/8".parse().unwrap(), "ten");
         table.remove("0.0.0.0/0".parse().unwrap());
-        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), Some(&"ten"));
+        assert_eq!(
+            table.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"ten")
+        );
         assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), None);
     }
 
