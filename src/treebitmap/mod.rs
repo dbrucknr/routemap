@@ -406,6 +406,35 @@ impl<A: IpAddress, V> RouteMap<A, V> {
     pub fn is_empty(&self) -> bool {
         self.count == 0
     }
+
+    /// Removes every entry, leaving an empty table.
+    ///
+    /// The root node is retained and reset in place — its bitmaps are zeroed and
+    /// its child/value `Vec`s are emptied — so the allocated capacity is kept for
+    /// subsequent inserts. After this call [`is_empty`](Self::is_empty) is `true`
+    /// and [`longest_match`](Self::longest_match) matches nothing.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use routemap::RouteMap;
+    /// use std::net::Ipv4Addr;
+    ///
+    /// let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+    /// table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+    /// table.insert("10.20.0.0/16".parse().unwrap(), "twenty");
+    ///
+    /// table.clear();
+    /// assert!(table.is_empty());
+    /// assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), None);
+    /// ```
+    pub fn clear(&mut self) {
+        self.root.internal = 0;
+        self.root.external = 0;
+        self.count = 0;
+        self.root.children.clear();
+        self.root.values.clear();
+    }
 }
 
 impl<A: IpAddress, V> Default for RouteMap<A, V> {
