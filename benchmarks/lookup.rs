@@ -2,11 +2,11 @@
 // Run:          cargo bench
 // HTML reports: target/criterion/report/index.html
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
-use routemap::RouteMap;
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use ipnetx::prefix::IpPrefix;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use routemap::RouteMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 const SEED: u64 = 0xc0ffee;
@@ -132,13 +132,9 @@ fn bench_lookup_ipv4(c: &mut Criterion) {
         let addrs = ipv4_addrs(size);
 
         group.throughput(Throughput::Elements(size as u64));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            &addrs,
-            |b, addrs| {
-                b.iter(|| addrs.iter().map(|&addr| table.longest_match(addr)).count());
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(size), &addrs, |b, addrs| {
+            b.iter(|| addrs.iter().map(|&addr| table.longest_match(addr)).count());
+        });
     }
     group.finish();
 }
@@ -153,13 +149,9 @@ fn bench_lookup_ipv6(c: &mut Criterion) {
         let addrs = ipv6_addrs(size);
 
         group.throughput(Throughput::Elements(size as u64));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            &addrs,
-            |b, addrs| {
-                b.iter(|| addrs.iter().map(|&addr| table.longest_match(addr)).count());
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(size), &addrs, |b, addrs| {
+            b.iter(|| addrs.iter().map(|&addr| table.longest_match(addr)).count());
+        });
     }
     group.finish();
 }
