@@ -71,6 +71,7 @@ fn rank(bitmap: u32, position: u32) -> usize {
 /// assert_eq!(table.longest_match("10.99.0.1".parse().unwrap()), Some(&"datacenter"));
 /// assert_eq!(table.longest_match("192.168.1.1".parse().unwrap()), None);
 /// ```
+#[derive(Clone)]
 pub struct RouteMap<A: IpAddress, V> {
     root: TbNode<V>,
     count: usize,

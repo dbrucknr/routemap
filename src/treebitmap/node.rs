@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub(crate) struct TbNode<V> {
     /// Bits 1–15: which internal prefix positions are occupied (stride-4 binary heap).
     pub(crate) internal: u32,
