@@ -369,9 +369,9 @@ dependencies = [
 
 [[package]]
 name = "ipnetx"
-version = "0.2.0"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9224ebd22cf16f47fd99f3658a3d23771d84b5db7c8e5f52402cba71e5e4535"
+checksum = "66a41eaf30def4acb80956c4fad7f2593821496fb1985bb91356752a8a055be2"
 
 [[package]]
 name = "itertools"
