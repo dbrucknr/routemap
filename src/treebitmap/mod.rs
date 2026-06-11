@@ -169,48 +169,7 @@ impl<A: IpAddress, V> RouteMap<A, V> {
     /// );
     /// ```
     pub fn longest_match(&self, addr: A) -> Option<&V> {
-        let addr = addr.to_u128();
-        let addr_bits = A::BITS as u32;
-        let total_strides = addr_bits / STRIDE;
-        let mut node = &self.root;
-        let mut best: Option<&V> = None;
-        let mut last_advanced = false;
-
-        for hop in 0..total_strides {
-            let nib = nibble(addr, addr_bits, hop);
-
-            // Check all four relative lengths (0–3) inside this node's stride,
-            // from least to most specific so the last hit wins.
-            for rel_len in 0..STRIDE {
-                let rel_v = if rel_len == 0 {
-                    0u32
-                } else {
-                    nib >> (STRIDE - rel_len)
-                };
-                let bpos = (1u32 << rel_len) + rel_v;
-                if (node.internal >> bpos) & 1 == 1 {
-                    best = Some(&node.values[rank(node.internal, bpos)]);
-                }
-            }
-
-            // Descend to the external child for the full nibble, or stop.
-            if (node.external >> nib) & 1 == 0 {
-                last_advanced = false;
-                break;
-            }
-            node = &node.children[rank(node.external, nib)];
-            last_advanced = true;
-        }
-
-        // If we advanced on the very last stride, the depth-(total_strides) node was
-        // never visited by the loop body. Check its catch-all position (rel_len=0,
-        // bpos=1) — the only position reachable when all address bits are consumed.
-        // This handles /32 for IPv4 and /128 for IPv6.
-        if last_advanced && (node.internal >> 1) & 1 == 1 {
-            best = Some(&node.values[rank(node.internal, 1)]);
-        }
-
-        best
+        self.longest_match_impl(addr.to_u128()).map(|(v, _)| v)
     }
 
     /// Like [`longest_match`](Self::longest_match), but also returns the matching
@@ -244,17 +203,23 @@ impl<A: IpAddress, V> RouteMap<A, V> {
     ///     Some(("0.0.0.0/0".parse().unwrap(), &"default")),
     /// );
     /// ```
-    // This mirrors `longest_match` rather than delegating to it: `longest_match`
-    // is the benchmarked hot path, and threading prefix tracking through it would
-    // burden every lookup. Here we additionally track the matched prefix length
-    // and build the `IpPrefix` exactly once, at return.
     pub fn longest_match_entry(&self, addr: A) -> Option<(IpPrefix<A>, &V)> {
         let addr = addr.to_u128();
+        self.longest_match_impl(addr).map(|(value, best_len)| {
+            // `masked()` clears host bits to yield the canonical network form
+            // (and sidesteps the `1 << addr_bits` shift hazard for a /0 default).
+            let prefix = IpPrefix::new(A::from_u128(addr), best_len as u8)
+                .expect("best_len never exceeds A::BITS")
+                .masked();
+            (prefix, value)
+        })
+    }
+
+    fn longest_match_impl(&self, addr: u128) -> Option<(&V, u32)> {
         let addr_bits = A::BITS as u32;
         let total_strides = addr_bits / STRIDE;
         let mut node = &self.root;
-        let mut best: Option<&V> = None;
-        let mut best_len: u32 = 0;
+        let mut best: Option<(&V, u32)> = None;
         let mut last_advanced = false;
 
         for hop in 0..total_strides {
@@ -270,8 +235,7 @@ impl<A: IpAddress, V> RouteMap<A, V> {
                 };
                 let bpos = (1u32 << rel_len) + rel_v;
                 if (node.internal >> bpos) & 1 == 1 {
-                    best = Some(&node.values[rank(node.internal, bpos)]);
-                    best_len = hop * STRIDE + rel_len;
+                    best = Some((&node.values[rank(node.internal, bpos)], hop * STRIDE + rel_len));
                 }
             }
 
@@ -289,19 +253,10 @@ impl<A: IpAddress, V> RouteMap<A, V> {
         // bpos=1) — the only position reachable when all address bits are consumed.
         // This handles /32 for IPv4 and /128 for IPv6.
         if last_advanced && (node.internal >> 1) & 1 == 1 {
-            best = Some(&node.values[rank(node.internal, 1)]);
-            best_len = addr_bits;
+            best = Some((&node.values[rank(node.internal, 1)], addr_bits));
         }
 
-        best.map(|value| {
-            // The matched prefix shares its leading `best_len` bits with `addr`;
-            // `masked()` clears the host bits to yield the canonical network form
-            // (and sidesteps the `1 << addr_bits` shift hazard for a /0 default).
-            let prefix = IpPrefix::new(A::from_u128(addr), best_len as u8)
-                .expect("best_len never exceeds A::BITS")
-                .masked();
-            (prefix, value)
-        })
+        best
     }
 
     /// Removes the entry for `prefix` and returns its value, or `None` if not found.
@@ -1648,6 +1603,32 @@ mod tests {
         let table: RouteMap<Ipv4Addr, &str> = RouteMap::default();
         assert_eq!(table.iter().count(), 0);
         assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), None);
+    }
+
+    // ── clear ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn clear_empties_table() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        table.insert("10.20.0.0/16".parse().unwrap(), "twenty");
+        table.clear();
+        assert!(table.is_empty());
+        assert_eq!(table.len(), 0);
+        assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), None);
+    }
+
+    #[test]
+    fn clear_then_reinsert_works() {
+        let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), "ten");
+        table.clear();
+        table.insert("192.168.0.0/16".parse().unwrap(), "home");
+        assert_eq!(table.len(), 1);
+        assert_eq!(
+            table.longest_match("192.168.1.1".parse().unwrap()),
+            Some(&"home")
+        );
     }
 
     // ── Debug ─────────────────────────────────────────────────────────────────
