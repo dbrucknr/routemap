@@ -82,6 +82,29 @@ All results collected with `cargo bench` (Criterion 0.8, release profile).
 
 ---
 
+## Treebitmap (stride-4) — pre-optimization baseline
+
+*Recorded 2026-06-19 on Apple M2 Max, Rust 1.86.0. Pre-optimization baseline before
+inline hints, iterative traversal, and iterator stack pre-allocation.*
+
+### Insert — time to build a fresh table from N prefixes
+
+| prefixes | IPv4 time | IPv4 thrpt | IPv6 time | IPv6 thrpt |
+|---:|---:|---:|---:|---:|
+| 1,000 | 68.97 µs | 14.50 M/s | 237.56 µs | 4.21 M/s |
+| 10,000 | 696.61 µs | 14.36 M/s | 2.37 ms | 4.23 M/s |
+| 100,000 | 7.06 ms | 14.16 M/s | 28.36 ms | 3.53 M/s |
+
+### Lookup — `longest_match` throughput on a pre-built table
+
+| prefixes | IPv4 time | IPv4 thrpt | IPv6 time | IPv6 thrpt |
+|---:|---:|---:|---:|---:|
+| 1,000 | 11.33 µs | 88.26 M/s | 12.08 µs | 82.80 M/s |
+| 10,000 | 258.21 µs | 38.73 M/s | 152.08 µs | 65.75 M/s |
+| 100,000 | 4.01 ms | 24.97 M/s | 2.11 ms | 47.32 M/s |
+
+---
+
 ## Comparison (binary trie → treebitmap)
 
 *Speedup is the ratio of throughput: treebitmap M/s ÷ binary trie M/s.*
