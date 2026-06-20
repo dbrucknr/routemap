@@ -4,8 +4,10 @@ Fast, in-memory **Longest Prefix Match (LPM)** routing tables for IPv4 and IPv6 
 
 [![Crates.io](https://img.shields.io/crates/v/routemap.svg)](https://crates.io/crates/routemap)
 [![Docs.rs](https://docs.rs/routemap/badge.svg)](https://docs.rs/routemap/latest/routemap/)
+[![Rust 1.86+](https://img.shields.io/badge/rust-1.86%2B-orange.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/dbrucknr/routemap/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/dbrucknr/routemap/graph/badge.svg)](https://codecov.io/gh/dbrucknr/routemap)
+[![CI](https://github.com/dbrucknr/ipnetx/actions/workflows/ci.yml/badge.svg)](https://github.com/dbrucknr/routemap/actions/workflows/ci.yml)
 
 ```toml
 [dependencies]
@@ -202,6 +204,25 @@ let mut entries: Vec<_> = table.iter().collect();
 entries.sort_by_key(|(p, _)| p.mask());
 assert_eq!(entries[0].1, &"broad");    // /8 comes first
 assert_eq!(entries[1].1, &"specific"); // /16 comes second
+```
+
+### `clear()`
+
+Removes every entry from the table in place. The root node's allocated capacity is
+retained so subsequent inserts don't need to reallocate.
+
+```rust
+# use routemap::RouteMap;
+# use std::net::Ipv4Addr;
+# let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+
+table.clear();
+
+assert!(table.is_empty());
+assert_eq!(table.len(), 0);
+assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), None);
 ```
 
 ---

@@ -1,0 +1,25 @@
+[package]
+name = "routemap-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Prevent this crate from being picked up as a workspace member.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+ipnetx = "0.3.0"
+
+[dependencies.routemap]
+path = ".."
+
+[[bin]]
+name = "lpm_ops"
+path = "fuzz_targets/lpm_ops.rs"
+test = false
+doc = false

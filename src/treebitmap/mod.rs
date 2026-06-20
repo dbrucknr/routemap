@@ -826,6 +826,164 @@ mod tests {
         assert_eq!(rank(bitmap, 6), 2);
     }
 
+    #[test]
+    fn rank_position_zero() {
+        // No bits exist below position 0, regardless of bitmap contents.
+        assert_eq!(rank(u32::MAX, 0), 0);
+    }
+
+    #[test]
+    fn rank_position_31() {
+        // All 31 lower bits set → rank at 31 is 31.
+        assert_eq!(rank(u32::MAX, 31), 31);
+    }
+
+    #[test]
+    fn rank_all_bits_set() {
+        // u32::MAX with position 16 → exactly 16 bits set below.
+        assert_eq!(rank(u32::MAX, 16), 16);
+    }
+
+    // ── nibble primitive ──────────────────────────────────────────────────────
+
+    #[test]
+    fn nibble_ipv4_hop0_all_values() {
+        // hop 0, addr_bits 32: shift = 32 - 4 = 28.  Top nibble of addr.
+        for nib in 0u32..=15 {
+            let addr = (nib as u128) << 28;
+            assert_eq!(nibble(addr, 32, 0), nib, "nib={nib}");
+        }
+    }
+
+    #[test]
+    fn nibble_ipv4_hop7_all_values() {
+        // hop 7, addr_bits 32: shift = 32 - 32 = 0.  Bottom nibble of addr.
+        for nib in 0u32..=15 {
+            let addr = nib as u128;
+            assert_eq!(nibble(addr, 32, 7), nib, "nib={nib}");
+        }
+    }
+
+    #[test]
+    fn nibble_ipv4_interior_hop() {
+        // 10.20.30.0 = 0x0A141E00; hop 1 extracts bits 24-27 = 0xA = 10.
+        let addr = u32::from(std::net::Ipv4Addr::new(10, 20, 30, 0)) as u128;
+        assert_eq!(nibble(addr, 32, 0), 0x0); // 0x0A >> 4 = 0
+        assert_eq!(nibble(addr, 32, 1), 0xA); // second nibble
+        assert_eq!(nibble(addr, 32, 2), 0x1); // third nibble
+        assert_eq!(nibble(addr, 32, 3), 0x4); // fourth nibble
+    }
+
+    #[test]
+    fn nibble_ipv6_hop0_all_values() {
+        // hop 0, addr_bits 128: shift = 124.  Top nibble of 128-bit address.
+        for nib in 0u32..=15 {
+            let addr = (nib as u128) << 124;
+            assert_eq!(nibble(addr, 128, 0), nib, "nib={nib}");
+        }
+    }
+
+    #[test]
+    fn nibble_ipv6_hop31_all_values() {
+        // hop 31, addr_bits 128: shift = 0.  Bottom nibble.
+        for nib in 0u32..=15 {
+            let addr = nib as u128;
+            assert_eq!(nibble(addr, 128, 31), nib, "nib={nib}");
+        }
+    }
+
+    // ── Clone independence ────────────────────────────────────────────────────
+
+    #[test]
+    fn clone_is_independent() {
+        let mut original: RouteMap<std::net::Ipv4Addr, &str> = RouteMap::new();
+        original.insert("10.0.0.0/8".parse().unwrap(), "original");
+
+        let mut cloned = original.clone();
+
+        // Mutate the clone — original must be unaffected.
+        cloned.insert("10.0.0.0/8".parse().unwrap(), "cloned");
+        cloned.insert("192.168.0.0/16".parse().unwrap(), "extra");
+
+        assert_eq!(
+            original.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"original")
+        );
+        assert_eq!(original.len(), 1);
+        assert_eq!(original.get("192.168.0.0/16".parse().unwrap()), None);
+
+        // Mutate the original — clone must be unaffected.
+        original.remove("10.0.0.0/8".parse().unwrap());
+        assert_eq!(
+            cloned.longest_match("10.0.0.1".parse().unwrap()),
+            Some(&"cloned")
+        );
+        assert_eq!(cloned.len(), 2);
+    }
+
+    // ── Iteration order ───────────────────────────────────────────────────────
+
+    #[test]
+    fn iter_yields_shorter_prefixes_before_children() {
+        // Build a tree where the root node holds an internal entry (/8) and
+        // also has a child that holds /16.  iter() must yield /8 first.
+        let mut table: RouteMap<std::net::Ipv4Addr, u32> = RouteMap::new();
+        table.insert("10.0.0.0/8".parse().unwrap(), 8);
+        table.insert("10.20.0.0/16".parse().unwrap(), 16);
+        table.insert("10.20.30.0/24".parse().unwrap(), 24);
+
+        let lengths: Vec<u8> = table.iter().map(|(p, _)| p.mask()).collect();
+        // Each prefix must appear before any longer prefix that it covers.
+        for i in 1..lengths.len() {
+            assert!(
+                lengths[i - 1] <= lengths[i],
+                "expected non-decreasing prefix lengths, got {:?}",
+                lengths
+            );
+        }
+    }
+
+    #[test]
+    fn iter_exact_dfs_order() {
+        // Stronger than iter_yields_shorter_prefixes_before_children: asserts the
+        // precise sequence, not just non-decreasing lengths.
+        //
+        // Root node internal bitmap holds all three of these simultaneously:
+        //   /0              → bpos 1  (rel_len 0, catch-all)
+        //   0.0.0.0/1       → bpos 2  (rel_len 1, top bit = 0)
+        //   128.0.0.0/1     → bpos 3  (rel_len 1, top bit = 1)
+        //
+        // 10.0.0.0/8 lives two external hops deeper (nibble 0 → nibble A).
+        //
+        // Expected DFS order:
+        //   1. All root internals in bpos order: /0, 0.0.0.0/1, 128.0.0.0/1
+        //   2. Root's external children in nibble order: nibble 0 → ... → 10.0.0.0/8
+        //
+        // This catches: wrong address order within the same prefix length (e.g.,
+        // 128.0.0.0/1 before 0.0.0.0/1), and children appearing before their
+        // parent node's internal entries.
+        let mut table: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+        table.insert("0.0.0.0/0".parse().unwrap(), 0);
+        table.insert("0.0.0.0/1".parse().unwrap(), 1);
+        table.insert("128.0.0.0/1".parse().unwrap(), 2);
+        table.insert("10.0.0.0/8".parse().unwrap(), 8);
+
+        let entries: Vec<(String, u32)> = table
+            .iter()
+            .map(|(p, &v)| (format!("{}/{}", p.ip(), p.mask()), v))
+            .collect();
+
+        assert_eq!(
+            entries,
+            vec![
+                ("0.0.0.0/0".to_string(), 0),
+                ("0.0.0.0/1".to_string(), 1),
+                ("128.0.0.0/1".to_string(), 2),
+                ("10.0.0.0/8".to_string(), 8),
+            ]
+        );
+    }
+
     // ── Empty table ───────────────────────────────────────────────────────────
 
     #[test]
@@ -2090,6 +2248,108 @@ mod prop_tests {
                 t.longest_match_entry(network),
                 Some((v6(addr & mask6(len), len), &val)),
             );
+        }
+
+        // ── remove isolation ──────────────────────────────────────────────────
+
+        // Removing one prefix from an N-entry table must not disturb any other entry.
+        #[test]
+        fn remove_one_leaves_others_intact(
+            ops in prop::collection::vec((any::<u32>(), 0u8..=32u8, any::<u32>()), 2..=20),
+            remove_idx in any::<usize>(),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            // Deduplicate by prefix so we know exactly which entries survive.
+            let mut entries: Vec<(u32, u8, u32)> = Vec::new();
+            for (addr, len, val) in ops {
+                let masked = addr & mask4(len);
+                if let Some(e) = entries.iter_mut().find(|(a, l, _)| *a == masked && *l == len) {
+                    e.2 = val; // last write wins, matching insert semantics
+                } else {
+                    entries.push((masked, len, val));
+                }
+            }
+            for &(addr, len, val) in &entries {
+                t.insert(v4(addr, len), val);
+            }
+
+            let idx = remove_idx % entries.len();
+            let (rm_addr, rm_len, _) = entries[idx];
+            t.remove(v4(rm_addr, rm_len));
+
+            for (i, &(addr, len, val)) in entries.iter().enumerate() {
+                if i == idx { continue; }
+                prop_assert_eq!(
+                    t.get(v4(addr, len)),
+                    Some(&val),
+                    "entry {}/{} missing after removing {}/{}",
+                    addr, len, rm_addr, rm_len,
+                );
+            }
+        }
+
+        // ── IPv6 remove ───────────────────────────────────────────────────────
+
+        // IPv6: after insert + remove the prefix is gone from every access path.
+        #[test]
+        fn ipv6_remove_clears_entry(
+            addr in any::<u128>(), len in 0u8..=128u8, val in any::<u32>(),
+        ) {
+            let mut t: RouteMap<Ipv6Addr, u32> = RouteMap::new();
+            t.insert(v6(addr, len), val);
+            prop_assert_eq!(t.remove(v6(addr, len)), Some(val));
+            prop_assert!(!t.contains(v6(addr, len)));
+            prop_assert_eq!(t.get(v6(addr, len)), None);
+            prop_assert_eq!(t.len(), 0);
+        }
+
+        // IPv6: removing the specific prefix falls back to the covering one.
+        #[test]
+        fn ipv6_remove_specific_falls_back_to_broad(
+            base in any::<u128>(),
+            broad_len in 0u8..=120u8,
+            extra in 1u8..=8u8,
+        ) {
+            let specific_len = broad_len + extra;
+            prop_assume!(specific_len <= 128);
+            let network = Ipv6Addr::from(base & mask6(specific_len));
+            let mut t: RouteMap<Ipv6Addr, u32> = RouteMap::new();
+            t.insert(v6(base, broad_len), 1);
+            t.insert(v6(base, specific_len), 2);
+            t.remove(v6(base, specific_len));
+            prop_assert_eq!(t.longest_match(network), Some(&1));
+        }
+
+        // ── clear at scale ────────────────────────────────────────────────────
+
+        // insert N prefixes → clear → table is empty → re-insert → all lookups correct.
+        #[test]
+        fn clear_then_reinsert_roundtrip(
+            ops in prop::collection::vec((any::<u32>(), 0u8..=32u8, any::<u32>()), 1..=30),
+        ) {
+            let mut t: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+            for &(addr, len, val) in &ops {
+                t.insert(v4(addr, len), val);
+            }
+            t.clear();
+            prop_assert_eq!(t.len(), 0);
+            prop_assert!(t.is_empty());
+            prop_assert_eq!(t.iter().count(), 0);
+
+            // Re-insert and verify all entries are accessible.
+            let mut expected: Vec<(u32, u8, u32)> = Vec::new();
+            for &(addr, len, val) in &ops {
+                let masked = addr & mask4(len);
+                if let Some(e) = expected.iter_mut().find(|(a, l, _)| *a == masked && *l == len) {
+                    e.2 = val;
+                } else {
+                    expected.push((masked, len, val));
+                }
+                t.insert(v4(addr, len), val);
+            }
+            for &(addr, len, val) in &expected {
+                prop_assert_eq!(t.get(v4(addr, len)), Some(&val));
+            }
         }
     }
 }

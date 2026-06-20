@@ -141,3 +141,98 @@ universality, and LPM correctness — are repeated for IPv6 with randomly genera
 *Why:* The IPv4 and IPv6 paths share the same generic implementation, but IPv6 uses
 32 strides instead of 8. Bugs in stride boundary arithmetic are much harder to trigger
 with 32-bit inputs alone.
+
+---
+
+## Fuzz testing
+
+Located in `fuzz/fuzz_targets/lpm_ops.rs`. The target generates arbitrary sequences
+of table operations — `insert`, `remove`, `longest_match`, `longest_match_entry`,
+`get`, `contains`, `clear` — and drives them into a live `RouteMap`. Any panic,
+out-of-bounds access, or undefined behaviour is reported as a crash.
+
+This is the strongest test layer for the bit-manipulation core: the `match_mask` /
+`leading_zeros` arithmetic in `longest_match_impl` and the `rank`-indexed `Vec`
+accesses are exactly the kind of code that fuzzing finds bugs in that proptest
+shrinking misses.
+
+### Prerequisites
+
+`cargo-fuzz` requires a nightly Rust toolchain:
+
+```sh
+rustup toolchain install nightly
+cargo +nightly install cargo-fuzz --locked
+```
+
+### Running the fuzzer
+
+From the repository root:
+
+```sh
+# Run indefinitely — Ctrl-C to stop
+cargo +nightly fuzz run lpm_ops
+
+# Save coverage-increasing inputs to a local corpus dir
+mkdir -p fuzz/corpus/lpm_ops
+cargo +nightly fuzz run lpm_ops fuzz/corpus/lpm_ops
+
+# Run for a fixed duration (seconds)
+cargo +nightly fuzz run lpm_ops fuzz/corpus/lpm_ops -- -max_total_time=300
+
+# List all targets
+cargo +nightly fuzz list
+```
+
+**macOS (Apple Silicon):** libFuzzer's AddressSanitizer is not supported on
+`aarch64-apple-darwin`. Add `-s none` to disable it:
+
+```sh
+cargo +nightly fuzz run lpm_ops -s none -- -max_total_time=300
+```
+
+The fuzzer prints a status line every few seconds:
+
+```
+#1234   NEW    cov: 87 ft: 102 corp: 5/320b exec/s: 12345 rss: 64Mb
+```
+
+| column | meaning |
+|---|---|
+| `cov` | source-code edges covered so far |
+| `corp` | number of interesting inputs saved to the corpus |
+| `exec/s` | fuzzer throughput |
+| `rss` | current memory usage |
+
+The corpus in `fuzz/corpus/lpm_ops/` is reused on the next run, so coverage
+accumulates across sessions. Corpus files and crash artifacts are gitignored.
+
+### Investigating a crash
+
+When the fuzzer finds a crash it writes the reproducer to
+`fuzz/artifacts/lpm_ops/crash-<hash>`. Reproduce it deterministically with:
+
+```sh
+cargo +nightly fuzz run lpm_ops fuzz/artifacts/lpm_ops/crash-<hash>
+```
+
+Minimise the input to the smallest case that still triggers the crash:
+
+```sh
+cargo +nightly fuzz tmin lpm_ops fuzz/artifacts/lpm_ops/crash-<hash>
+```
+
+Then add a regression test to `mod tests` or `mod prop_tests` so the case is covered
+forever.
+
+### CI integration
+
+For CI, a short smoke run catches obvious regressions against whatever corpus has
+been seeded:
+
+```sh
+cargo +nightly fuzz run lpm_ops fuzz/corpus/lpm_ops -s none -- -max_total_time=30
+```
+
+30 seconds is not enough to explore deep paths — for sustained coverage, run locally
+overnight or on a dedicated machine.
