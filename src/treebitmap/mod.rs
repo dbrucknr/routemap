@@ -39,16 +39,19 @@ fn rank(bitmap: u32, position: u32) -> usize {
 ///
 /// # Performance
 ///
-/// **Lookup** is the primary strength. At 100k prefixes on an M2 Max:
+/// **Lookup** is the primary strength. Benchmarked on an M2 Max with BGP-shaped
+/// prefix distributions (IPv4 /16–/28, IPv6 /48–/64):
 ///
-/// | | IPv4 | IPv6 |
+/// | prefixes | IPv4 | IPv6 |
 /// |---|---|---|
-/// | Throughput | 25 M lookups/s | 47 M lookups/s |
-/// | vs. binary trie | 1.35× faster | 3.54× faster |
+/// | 1,000 | 202 M/s | 124 M/s |
+/// | 10,000 | 81 M/s | 74 M/s |
+/// | 100,000 | 35 M/s | 49 M/s |
 ///
-/// IPv6 benefits most: the binary trie makes up to 128 pointer hops for a /128;
-/// the treebitmap caps this at 32. Each hop is a potential cache miss at scale,
-/// so the 4× reduction in hops translates almost directly to a 3.5× speedup.
+/// At 1k prefixes the table fits in L1/L2 cache and lookups are compute-bound;
+/// at 100k most node accesses are L3 misses so throughput is memory-bound.
+/// IPv6 scales better at large sizes because its deeper tree structure amortises
+/// the per-node internal bitmap check over more strides.
 ///
 /// **Insert** has a cost: each node stores values and children in compact `Vec`s
 /// (no empty slots), so inserting into a populated node requires a `Vec::insert()`
