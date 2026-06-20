@@ -181,7 +181,7 @@ layout, traversal must decode internal bitmap positions back into prefix lengths
 
 ### 7.4 Testing improvements
 
-The current suite has 134 passing tests (unit + proptest) and previously achieved
+The current suite has 148 passing tests (unit + proptest) and previously achieved
 100% line coverage. The gaps below are about correctness confidence, not coverage numbers.
 
 **High priority**
@@ -190,33 +190,33 @@ The current suite has 134 passing tests (unit + proptest) and previously achieve
       `(addr: u32/u128, len: u8)` sequences to `insert`, `remove`, and
       `longest_match`. The `match_mask` / `leading_zeros` bit arithmetic in
       `longest_match_impl` is exactly what fuzzing catches that proptest shrinking misses.
-- [ ] **`remove` isolation property test.** `remove_clears_entry` only tests
+- [x] **`remove` isolation property test.** `remove_clears_entry` only tests
       single-entry tables. Add a property test that inserts N random prefixes, removes
       one, and asserts every other prefix is still accessible via `get` / `contains` /
       `longest_match`.
-- [ ] **`nibble()` direct unit tests.** The function is called on every hop but has
+- [x] **`nibble()` direct unit tests.** The function is called on every hop but has
       no isolated tests. Cover all 16 nibble values at each stride position for both
       IPv4 (positions 0–7) and IPv6 (positions 0–31), verifying the
       `addr_bits - (hop + 1) * STRIDE` shift at its boundaries.
 
 **Medium priority**
 
-- [ ] **`Clone` independence.** `RouteMap` derives `Clone` but no test mutates a
+- [x] **`Clone` independence.** `RouteMap` derives `Clone` but no test mutates a
       clone and verifies the original is unaffected (and vice versa).
-- [ ] **IPv6 `remove` property test.** IPv6 prop tests cover insert/contains/get/LPM
+- [x] **IPv6 `remove` property test.** IPv6 prop tests cover insert/contains/get/LPM
       but not remove. Mirror `remove_clears_entry` and `remove_specific_falls_back_to_broad`
       for the 128-bit address space.
-- [ ] **`clear()` at scale.** The existing `clear_then_reinsert_works` test only
+- [x] **`clear()` at scale.** The existing `clear_then_reinsert_works` test only
       clears 1 entry. Add a property test: insert N random prefixes → `clear` →
       assert `len == 0` and `is_empty` → re-insert the same prefixes → verify
       all lookups return the expected values.
-- [ ] **Iteration order assertion.** The docs promise depth-first order (shorter
+- [x] **Iteration order assertion.** The docs promise depth-first order (shorter
       prefixes at a node before its children). Add a deterministic test that builds a
       known tree and asserts the exact sequence yielded by `iter`.
 
 **Lower priority**
 
-- [ ] **`rank()` edge cases.** Add unit tests for position 0, position 31, and all
+- [x] **`rank()` edge cases.** Add unit tests for position 0, position 31, and all
       bits set (`u32::MAX`).
 - [ ] **Coverage gate in CI.** Enforce a minimum `llvm-cov` line coverage floor so
       regressions are caught automatically.
