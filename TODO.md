@@ -186,7 +186,7 @@ The current suite has 148 passing tests (unit + proptest) and previously achieve
 
 **High priority**
 
-- [ ] **Fuzz target (`cargo-fuzz`).** Add a libfuzzer target that feeds random
+- [x] **Fuzz target (`cargo-fuzz`).** Add a libfuzzer target that feeds random
       `(addr: u32/u128, len: u8)` sequences to `insert`, `remove`, and
       `longest_match`. The `match_mask` / `leading_zeros` bit arithmetic in
       `longest_match_impl` is exactly what fuzzing catches that proptest shrinking misses.

@@ -204,6 +204,25 @@ assert_eq!(entries[0].1, &"broad");    // /8 comes first
 assert_eq!(entries[1].1, &"specific"); // /16 comes second
 ```
 
+### `clear()`
+
+Removes every entry from the table in place. The root node's allocated capacity is
+retained so subsequent inserts don't need to reallocate.
+
+```rust
+# use routemap::RouteMap;
+# use std::net::Ipv4Addr;
+# let mut table: RouteMap<Ipv4Addr, &str> = RouteMap::new();
+table.insert("10.0.0.0/8".parse().unwrap(),   "broad");
+table.insert("10.20.0.0/16".parse().unwrap(), "specific");
+
+table.clear();
+
+assert!(table.is_empty());
+assert_eq!(table.len(), 0);
+assert_eq!(table.longest_match("10.0.0.1".parse().unwrap()), None);
+```
+
 ---
 
 ## Performance
