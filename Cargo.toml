@@ -1,6 +1,6 @@
 [package]
 name = "routemap"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 rust-version = "1.86"
 description = "Fast in-memory IP prefix routing tables for IPv4 and IPv6. Longest Prefix Match via stride-4 treebitmap, built on ipnetx."
