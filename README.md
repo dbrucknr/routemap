@@ -62,7 +62,7 @@ This is Longest Prefix Match. It is the core lookup rule behind:
 
 ## Use Cases
 
-**Software routers and network daemons.** Any process that needs to forward or classify packets by destination — userspace routers, VPN daemons, SDN data planes, traffic shapers. These workloads build a table once from a configuration or BGP feed and then perform millions of lookups per second. The treebitmap's lookup throughput (25–47 M/s at 100k prefixes) is designed exactly for this shape.
+**Software routers and network daemons.** Any process that needs to forward or classify packets by destination — userspace routers, VPN daemons, SDN data planes, traffic shapers. These workloads build a table once from a configuration or BGP feed and then perform millions of lookups per second. The treebitmap's lookup throughput (35–51 M/s at 100k prefixes) is designed exactly for this shape.
 
 **Firewall and ACL evaluation.** A firewall rule set is an LPM table where the value is a policy action (allow, deny, rate-limit). The most specific matching prefix wins — the same rule as routing. `routemap` evaluates the table in one pass with no per-lookup allocation, which matters when rules are evaluated on every packet.
 
@@ -217,9 +217,9 @@ figures are in **M/s — millions of operations per second**.
 
 | prefixes | IPv4 | IPv6 |
 |---:|---:|---:|
-| 1,000 | 89 M/s | 82 M/s |
-| 10,000 | 38 M/s | 65 M/s |
-| 100,000 | 25 M/s | 47 M/s |
+| 1,000 | 210 M/s | 131 M/s |
+| 10,000 | 82 M/s | 76 M/s |
+| 100,000 | 35 M/s | 51 M/s |
 
 IPv6 throughput *increases* relative to IPv4 at scale because the treebitmap's stride savings are proportionally larger: a binary trie would make up to 128 hops for a /128 prefix, the treebitmap caps this at 32.
 

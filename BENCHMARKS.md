@@ -82,6 +82,74 @@ All results collected with `cargo bench` (Criterion 0.8, release profile).
 
 ---
 
+## Treebitmap (stride-4) — pre-optimization baseline
+
+*Recorded 2026-06-19 on Apple M2 Max, Rust 1.86.0. Pre-optimization baseline before
+inline hints, iterative traversal, and iterator stack pre-allocation.*
+
+### Insert — time to build a fresh table from N prefixes
+
+| prefixes | IPv4 time | IPv4 thrpt | IPv6 time | IPv6 thrpt |
+|---:|---:|---:|---:|---:|
+| 1,000 | 68.97 µs | 14.50 M/s | 237.56 µs | 4.21 M/s |
+| 10,000 | 696.61 µs | 14.36 M/s | 2.37 ms | 4.23 M/s |
+| 100,000 | 7.06 ms | 14.16 M/s | 28.36 ms | 3.53 M/s |
+
+### Lookup — `longest_match` throughput on a pre-built table
+
+| prefixes | IPv4 time | IPv4 thrpt | IPv6 time | IPv6 thrpt |
+|---:|---:|---:|---:|---:|
+| 1,000 | 11.33 µs | 88.26 M/s | 12.08 µs | 82.80 M/s |
+| 10,000 | 258.21 µs | 38.73 M/s | 152.08 µs | 65.75 M/s |
+| 100,000 | 4.01 ms | 24.97 M/s | 2.11 ms | 47.32 M/s |
+
+---
+
+## Treebitmap (stride-4) — match-mask lookup optimization
+
+*Recorded 2026-06-19 on Apple M2 Max, Rust 1.86.0. Replaces the 4-iteration inner
+loop in `longest_match_impl` with a precomputed match mask + `leading_zeros()`,
+collapsing 4 conditional branches into 1 bit-AND and one branch.*
+
+### Insert — time to build a fresh table from N prefixes
+
+| prefixes | IPv4 time | IPv4 thrpt | IPv6 time | IPv6 thrpt |
+|---:|---:|---:|---:|---:|
+| 1,000 | 70.84 µs | 14.11 M/s | 246.24 µs | 4.06 M/s |
+| 10,000 | 717.08 µs | 13.95 M/s | 2.49 ms | 4.02 M/s |
+| 100,000 | 7.27 ms | 13.75 M/s | 29.32 ms | 3.41 M/s |
+
+### Lookup — `longest_match` throughput on a pre-built table
+
+| prefixes | IPv4 time | IPv4 thrpt | IPv6 time | IPv6 thrpt |
+|---:|---:|---:|---:|---:|
+| 1,000 | 4.95 µs | 202.1 M/s | 8.06 µs | 124.1 M/s |
+| 10,000 | 123.84 µs | 80.7 M/s | 136.02 µs | 73.5 M/s |
+| 100,000 | 2.89 ms | 34.6 M/s | 2.06 ms | 48.5 M/s |
+
+### Lookup speedup vs pre-optimization baseline
+
+| prefixes | IPv4 | IPv6 |
+|---:|---:|---:|
+| 1,000 | **2.29×** | **1.50×** |
+| 10,000 | **2.09×** | **1.12×** |
+| 100,000 | **1.39×** | **1.03×** |
+
+### Notes
+
+- Insert is unchanged — the optimization only touches the lookup path.
+- IPv4 gains are largest (2.3× at 1k, 1.4× at 100k). The 4 sequential branches
+  in the old inner loop were eliminated; the match-mask approach uses a single AND
+  plus `leading_zeros()` to find the most specific hit in one shot.
+- IPv6 benefits less because each lookup traverses more nodes (/48–/64 → 12–16
+  strides vs. 4–7 for IPv4 /16–/28). The internal bitmap check is a smaller
+  fraction of total IPv6 lookup work; cache miss time on deeper node paths dominates.
+- Gains shrink at 100k because cache misses dominate at that scale — no instruction
+  reduction helps while stalled on memory. The 1.4× IPv4 improvement at 100k still
+  reflects reduced instruction pressure in the cache-hit portion of each lookup.
+
+---
+
 ## Comparison (binary trie → treebitmap)
 
 *Speedup is the ratio of throughput: treebitmap M/s ÷ binary trie M/s.*

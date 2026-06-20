@@ -9,6 +9,7 @@ const STRIDE: u32 = 4;
 
 /// Returns the nibble (4-bit value) at stride index `hop` within `addr`.
 /// `addr_bits` is A::BITS (32 for IPv4, 128 for IPv6).
+#[inline]
 fn nibble(addr: u128, addr_bits: u32, hop: u32) -> u32 {
     let shift = addr_bits - (hop + 1) * STRIDE;
     ((addr >> shift) & 0xF) as u32
@@ -16,6 +17,7 @@ fn nibble(addr: u128, addr_bits: u32, hop: u32) -> u32 {
 
 /// Counts how many set bits in `bitmap` fall below `position`.
 /// Maps a bitmap position to a compact-Vec index via a single POPCNT.
+#[inline]
 fn rank(bitmap: u32, position: u32) -> usize {
     (bitmap & ((1 << position) - 1)).count_ones() as usize
 }
@@ -37,16 +39,19 @@ fn rank(bitmap: u32, position: u32) -> usize {
 ///
 /// # Performance
 ///
-/// **Lookup** is the primary strength. At 100k prefixes on an M2 Max:
+/// **Lookup** is the primary strength. Benchmarked on an M2 Max with BGP-shaped
+/// prefix distributions (IPv4 /16–/28, IPv6 /48–/64):
 ///
-/// | | IPv4 | IPv6 |
+/// | prefixes | IPv4 | IPv6 |
 /// |---|---|---|
-/// | Throughput | 25 M lookups/s | 47 M lookups/s |
-/// | vs. binary trie | 1.35× faster | 3.54× faster |
+/// | 1,000 | 202 M/s | 124 M/s |
+/// | 10,000 | 81 M/s | 74 M/s |
+/// | 100,000 | 35 M/s | 49 M/s |
 ///
-/// IPv6 benefits most: the binary trie makes up to 128 pointer hops for a /128;
-/// the treebitmap caps this at 32. Each hop is a potential cache miss at scale,
-/// so the 4× reduction in hops translates almost directly to a 3.5× speedup.
+/// At 1k prefixes the table fits in L1/L2 cache and lookups are compute-bound;
+/// at 100k most node accesses are L3 misses so throughput is memory-bound.
+/// IPv6 scales better at large sizes because its deeper tree structure amortises
+/// the per-node internal bitmap check over more strides.
 ///
 /// **Insert** has a cost: each node stores values and children in compact `Vec`s
 /// (no empty slots), so inserting into a populated node requires a `Vec::insert()`
@@ -220,39 +225,44 @@ impl<A: IpAddress, V> RouteMap<A, V> {
         let total_strides = addr_bits / STRIDE;
         let mut node = &self.root;
         let mut best: Option<(&V, u32)> = None;
-        let mut last_advanced = false;
+        let mut hop = 0;
 
-        for hop in 0..total_strides {
+        while hop < total_strides {
             let nib = nibble(addr, addr_bits, hop);
 
-            // Check all four relative lengths (0–3) inside this node's stride,
-            // from least to most specific so the last hit wins.
-            for rel_len in 0..STRIDE {
-                let rel_v = if rel_len == 0 {
-                    0u32
-                } else {
-                    nib >> (STRIDE - rel_len)
-                };
-                let bpos = (1u32 << rel_len) + rel_v;
-                if (node.internal >> bpos) & 1 == 1 {
-                    best = Some((&node.values[rank(node.internal, bpos)], hop * STRIDE + rel_len));
-                }
+            // Build a mask of the four internal-bitmap positions that could match
+            // this nibble (one per relative prefix length 0–3), then find the
+            // most-specific hit in a single AND + leading_zeros instead of four
+            // sequential branches.
+            //
+            // Position encoding (binary-heap indexing):
+            //   rel_len 0 → bpos 1          (catch-all: matches any nibble)
+            //   rel_len 1 → bpos 2|(nib>>3) (top 1 bit of nibble)
+            //   rel_len 2 → bpos 4|(nib>>2) (top 2 bits)
+            //   rel_len 3 → bpos 8|(nib>>1) (top 3 bits)
+            let match_mask = (1u32 << 1)
+                | (1u32 << (2 | (nib >> 3)))
+                | (1u32 << (4 | (nib >> 2)))
+                | (1u32 << (8 | (nib >> 1)));
+            let hits = node.internal & match_mask;
+            if hits != 0 {
+                // Highest set bit = most specific matching prefix length.
+                let bpos = 31 - hits.leading_zeros();
+                let rel_len = 31 - bpos.leading_zeros(); // floor(log2(bpos))
+                best = Some((&node.values[rank(node.internal, bpos)], hop * STRIDE + rel_len));
             }
 
             // Descend to the external child for the full nibble, or stop.
             if (node.external >> nib) & 1 == 0 {
-                last_advanced = false;
                 break;
             }
             node = &node.children[rank(node.external, nib)];
-            last_advanced = true;
+            hop += 1;
         }
 
-        // If we advanced on the very last stride, the depth-(total_strides) node was
-        // never visited by the loop body. Check its catch-all position (rel_len=0,
-        // bpos=1) — the only position reachable when all address bits are consumed.
-        // This handles /32 for IPv4 and /128 for IPv6.
-        if last_advanced && (node.internal >> 1) & 1 == 1 {
+        // If we completed all strides, the depth-(total_strides) node holds /32 or
+        // /128 at the catch-all position (bpos=1).
+        if hop == total_strides && (node.internal >> 1) & 1 == 1 {
             best = Some((&node.values[rank(node.internal, 1)], addr_bits));
         }
 
@@ -376,14 +386,17 @@ impl<A: IpAddress, V> RouteMap<A, V> {
     /// assert_eq!(entries[1].1, &"specific");
     /// ```
     pub fn iter(&self) -> Iter<'_, A, V> {
+        let total_strides = A::BITS as usize / STRIDE as usize;
+        let mut stack = Vec::with_capacity(total_strides + 1);
+        stack.push(IterFrame {
+            node: &self.root,
+            hop: 0,
+            addr: 0,
+            internal_cursor: 1,
+            external_cursor: 0,
+        });
         Iter {
-            stack: vec![IterFrame {
-                node: &self.root,
-                hop: 0,
-                addr: 0,
-                internal_cursor: 1,
-                external_cursor: 0,
-            }],
+            stack,
             addr_bits: A::BITS as u32,
             _marker: PhantomData,
         }
@@ -530,76 +543,62 @@ fn insert_at<V>(
     rel_len: u32,
     value: V,
 ) -> bool {
-    if current_hop == full_hops {
-        let nib = if rel_len > 0 {
-            nibble(addr, addr_bits, current_hop) >> (STRIDE - rel_len)
-        } else {
-            0
-        };
-        let bpos = (1u32 << rel_len) + nib;
-        let idx = rank(node.internal, bpos);
-        if (node.internal >> bpos) & 1 == 1 {
-            node.values[idx] = value;
-            false // overwrite
-        } else {
-            node.values.insert(idx, value);
-            node.internal |= 1 << bpos;
-            true // new entry
+    let mut current = node;
+    let mut hop = current_hop;
+    while hop < full_hops {
+        let nib = nibble(addr, addr_bits, hop);
+        let child_idx = rank(current.external, nib);
+        if (current.external >> nib) & 1 == 0 {
+            current.children.insert(child_idx, TbNode::new());
+            current.external |= 1 << nib;
         }
+        current = &mut current.children[child_idx];
+        hop += 1;
+    }
+    let nib = if rel_len > 0 {
+        nibble(addr, addr_bits, hop) >> (STRIDE - rel_len)
     } else {
-        let nib = nibble(addr, addr_bits, current_hop);
-        let already_exists = (node.external >> nib) & 1 != 0;
-        let child_idx = rank(node.external, nib);
-        if !already_exists {
-            node.children.insert(child_idx, TbNode::new());
-            node.external |= 1 << nib;
-        }
-        insert_at(
-            &mut node.children[child_idx],
-            addr,
-            addr_bits,
-            current_hop + 1,
-            full_hops,
-            rel_len,
-            value,
-        )
+        0
+    };
+    let bpos = (1u32 << rel_len) + nib;
+    let idx = rank(current.internal, bpos);
+    if (current.internal >> bpos) & 1 == 1 {
+        current.values[idx] = value;
+        false
+    } else {
+        current.values.insert(idx, value);
+        current.internal |= 1 << bpos;
+        true
     }
 }
 
 fn get_at<V>(
-    node: &TbNode<V>,
+    mut node: &TbNode<V>,
     addr: u128,
     addr_bits: u32,
     current_hop: u32,
     full_hops: u32,
     rel_len: u32,
 ) -> Option<&V> {
-    if current_hop == full_hops {
-        let nib = if rel_len > 0 {
-            nibble(addr, addr_bits, current_hop) >> (STRIDE - rel_len)
-        } else {
-            0
-        };
-        let bpos = (1u32 << rel_len) + nib;
-        if (node.internal >> bpos) & 1 == 1 {
-            Some(&node.values[rank(node.internal, bpos)])
-        } else {
-            None
-        }
-    } else {
-        let nib = nibble(addr, addr_bits, current_hop);
+    let mut hop = current_hop;
+    while hop < full_hops {
+        let nib = nibble(addr, addr_bits, hop);
         if (node.external >> nib) & 1 == 0 {
             return None;
         }
-        let child_idx = rank(node.external, nib);
-        get_at(
-            &node.children[child_idx],
-            addr,
-            addr_bits,
-            current_hop + 1,
-            full_hops,
-            rel_len,
-        )
+        node = &node.children[rank(node.external, nib)];
+        hop += 1;
+    }
+    let nib = if rel_len > 0 {
+        nibble(addr, addr_bits, hop) >> (STRIDE - rel_len)
+    } else {
+        0
+    };
+    let bpos = (1u32 << rel_len) + nib;
+    if (node.internal >> bpos) & 1 == 1 {
+        Some(&node.values[rank(node.internal, bpos)])
+    } else {
+        None
     }
 }
 
@@ -657,36 +656,29 @@ fn remove_at<V>(
 }
 
 fn contains_at<V>(
-    node: &TbNode<V>,
+    mut node: &TbNode<V>,
     addr: u128,
     addr_bits: u32,
     current_hop: u32,
     full_hops: u32,
     rel_len: u32,
 ) -> bool {
-    if current_hop == full_hops {
-        let nib = if rel_len > 0 {
-            nibble(addr, addr_bits, current_hop) >> (STRIDE - rel_len)
-        } else {
-            0
-        };
-        let bpos = (1u32 << rel_len) + nib;
-        (node.internal >> bpos) & 1 == 1
-    } else {
-        let nib = nibble(addr, addr_bits, current_hop);
+    let mut hop = current_hop;
+    while hop < full_hops {
+        let nib = nibble(addr, addr_bits, hop);
         if (node.external >> nib) & 1 == 0 {
             return false;
         }
-        let child_idx = rank(node.external, nib);
-        contains_at(
-            &node.children[child_idx],
-            addr,
-            addr_bits,
-            current_hop + 1,
-            full_hops,
-            rel_len,
-        )
+        node = &node.children[rank(node.external, nib)];
+        hop += 1;
     }
+    let nib = if rel_len > 0 {
+        nibble(addr, addr_bits, hop) >> (STRIDE - rel_len)
+    } else {
+        0
+    };
+    let bpos = (1u32 << rel_len) + nib;
+    (node.internal >> bpos) & 1 == 1
 }
 
 // ── Iterator ──────────────────────────────────────────────────────────────────
