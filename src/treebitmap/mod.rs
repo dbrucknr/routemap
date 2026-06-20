@@ -943,6 +943,47 @@ mod tests {
         }
     }
 
+    #[test]
+    fn iter_exact_dfs_order() {
+        // Stronger than iter_yields_shorter_prefixes_before_children: asserts the
+        // precise sequence, not just non-decreasing lengths.
+        //
+        // Root node internal bitmap holds all three of these simultaneously:
+        //   /0              → bpos 1  (rel_len 0, catch-all)
+        //   0.0.0.0/1       → bpos 2  (rel_len 1, top bit = 0)
+        //   128.0.0.0/1     → bpos 3  (rel_len 1, top bit = 1)
+        //
+        // 10.0.0.0/8 lives two external hops deeper (nibble 0 → nibble A).
+        //
+        // Expected DFS order:
+        //   1. All root internals in bpos order: /0, 0.0.0.0/1, 128.0.0.0/1
+        //   2. Root's external children in nibble order: nibble 0 → ... → 10.0.0.0/8
+        //
+        // This catches: wrong address order within the same prefix length (e.g.,
+        // 128.0.0.0/1 before 0.0.0.0/1), and children appearing before their
+        // parent node's internal entries.
+        let mut table: RouteMap<Ipv4Addr, u32> = RouteMap::new();
+        table.insert("0.0.0.0/0".parse().unwrap(), 0);
+        table.insert("0.0.0.0/1".parse().unwrap(), 1);
+        table.insert("128.0.0.0/1".parse().unwrap(), 2);
+        table.insert("10.0.0.0/8".parse().unwrap(), 8);
+
+        let entries: Vec<(String, u32)> = table
+            .iter()
+            .map(|(p, &v)| (format!("{}/{}", p.ip(), p.mask()), v))
+            .collect();
+
+        assert_eq!(
+            entries,
+            vec![
+                ("0.0.0.0/0".to_string(), 0),
+                ("0.0.0.0/1".to_string(), 1),
+                ("128.0.0.0/1".to_string(), 2),
+                ("10.0.0.0/8".to_string(), 8),
+            ]
+        );
+    }
+
     // ── Empty table ───────────────────────────────────────────────────────────
 
     #[test]
