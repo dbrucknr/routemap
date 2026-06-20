@@ -1,0 +1,38 @@
+name: Fuzz (smoke)
+
+# Run a short fuzzing session on every push to main and on demand.
+# 30 seconds catches obvious panics and regressions; not a substitute
+# for continuous fuzzing.
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly toolchain
+        run: rustup toolchain install nightly --no-self-update
+
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
+
+      - name: Run fuzz target (30 s)
+        run: |
+          mkdir -p fuzz/corpus/lpm_ops
+          cargo +nightly fuzz run lpm_ops \
+            fuzz/corpus/lpm_ops \
+            -- -max_total_time=30 -max_len=4096
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-lpm_ops
+          path: fuzz/artifacts/lpm_ops/
