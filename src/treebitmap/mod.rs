@@ -227,18 +227,26 @@ impl<A: IpAddress, V> RouteMap<A, V> {
         while hop < total_strides {
             let nib = nibble(addr, addr_bits, hop);
 
-            // Check all four relative lengths (0–3) inside this node's stride,
-            // from least to most specific so the last hit wins.
-            for rel_len in 0..STRIDE {
-                let rel_v = if rel_len == 0 {
-                    0u32
-                } else {
-                    nib >> (STRIDE - rel_len)
-                };
-                let bpos = (1u32 << rel_len) + rel_v;
-                if (node.internal >> bpos) & 1 == 1 {
-                    best = Some((&node.values[rank(node.internal, bpos)], hop * STRIDE + rel_len));
-                }
+            // Build a mask of the four internal-bitmap positions that could match
+            // this nibble (one per relative prefix length 0–3), then find the
+            // most-specific hit in a single AND + leading_zeros instead of four
+            // sequential branches.
+            //
+            // Position encoding (binary-heap indexing):
+            //   rel_len 0 → bpos 1          (catch-all: matches any nibble)
+            //   rel_len 1 → bpos 2|(nib>>3) (top 1 bit of nibble)
+            //   rel_len 2 → bpos 4|(nib>>2) (top 2 bits)
+            //   rel_len 3 → bpos 8|(nib>>1) (top 3 bits)
+            let match_mask = (1u32 << 1)
+                | (1u32 << (2 | (nib >> 3)))
+                | (1u32 << (4 | (nib >> 2)))
+                | (1u32 << (8 | (nib >> 1)));
+            let hits = node.internal & match_mask;
+            if hits != 0 {
+                // Highest set bit = most specific matching prefix length.
+                let bpos = 31 - hits.leading_zeros();
+                let rel_len = 31 - bpos.leading_zeros(); // floor(log2(bpos))
+                best = Some((&node.values[rank(node.internal, bpos)], hop * STRIDE + rel_len));
             }
 
             // Descend to the external child for the full nibble, or stop.
